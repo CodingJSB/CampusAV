@@ -18,6 +18,7 @@ import { InventoryTable } from './components/InventoryTable';
 import { ClassroomPackagesView } from './components/ClassroomPackagesView';
 import { ItemDetailModal } from './components/ItemDetailModal';
 import { BudgetReportModal } from './components/BudgetReportModal';
+import { exportActiveInventory } from './utils/spreadsheet';
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -36,6 +37,10 @@ export default function App() {
   const [items, setItems] = useState<AVItem[]>(() => getSampleInventory());
   const [activeFilename, setActiveFilename] = useState<string | null>('Sample_College_AV_Fleet.xlsx');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'bundled' | 'quarterly' | 'maintenance' | 'inventory' | 'reports'>('dashboard');
+
+  // Track edits made during session
+  const [editedCount, setEditedCount] = useState<number>(0);
+  const [lastExportedTime, setLastExportedTime] = useState<string | null>(null);
 
   // Modals & Selection
   const [selectedItem, setSelectedItem] = useState<AVItem | null>(null);
@@ -74,6 +79,8 @@ export default function App() {
     setActiveFilename(filename);
     setSelectedFY(null);
     setLifespanOffset(0);
+    setEditedCount(0);
+    setLastExportedTime(null);
   };
 
   const handleResetToSample = () => {
@@ -81,12 +88,16 @@ export default function App() {
     setActiveFilename('Sample_College_AV_Fleet.xlsx');
     setSelectedFY(null);
     setLifespanOffset(0);
+    setEditedCount(0);
+    setLastExportedTime(null);
   };
 
   const handleClearData = () => {
     setItems([]);
     setActiveFilename(null);
     setSelectedFY(null);
+    setEditedCount(0);
+    setLastExportedTime(null);
   };
 
   const handleOpenItem = (item: AVItem) => {
@@ -96,8 +107,30 @@ export default function App() {
 
   const handleUpdateItem = (updatedItem: AVItem) => {
     setItems((prev) => prev.map((it) => (it.id === updatedItem.id ? updatedItem : it)));
+    setEditedCount((prev) => prev + 1);
     if (selectedItem?.id === updatedItem.id) {
       setSelectedItem(updatedItem);
+    }
+  };
+
+  const handleDownloadUpdatedFile = (format: 'csv' | 'xlsx' = 'csv') => {
+    const rawName = activeFilename ? activeFilename.replace(/\.[^/.]+$/, '') : 'Campus_AV_Inventory';
+    const cleanName = rawName.replace(/_Updated_\d{4}-\d{2}-\d{2}$/, '');
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `${cleanName}_Updated_${dateStr}.${format}`;
+    exportActiveInventory(items, format, filename);
+    setLastExportedTime(new Date().toLocaleTimeString());
+  };
+
+  const handleSelectFY = (fy: string | null) => {
+    setSelectedFY(fy);
+    if (fy) {
+      setTimeout(() => {
+        const el = document.getElementById('fleet-directory-section');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 50);
     }
   };
 
@@ -133,9 +166,25 @@ export default function App() {
             <strong className="font-mono text-slate-800">{activeFilename || 'None loaded'}</strong>
             <span className="text-slate-300">·</span>
             <span>{items.length} Classrooms/Assets Tracked</span>
+            {editedCount > 0 && (
+              <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-300">
+                {editedCount} edit{editedCount > 1 ? 's' : ''} saved
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
+            {editedCount > 0 && (
+              <button
+                onClick={() => handleDownloadUpdatedFile('csv')}
+                className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold shadow-xs transition-colors"
+                title="Download updated CSV file with your saved edits"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                <span>Download Updated CSV</span>
+              </button>
+            )}
+
             {lifespanOffset !== 0 && (
               <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 font-medium">
                 Simulation Active: {lifespanOffset > 0 ? `+${lifespanOffset}` : lifespanOffset} yr shelflife
@@ -178,11 +227,56 @@ export default function App() {
             {/* TAB: DASHBOARD & LIFECYCLE OVERVIEW */}
             {activeTab === 'dashboard' && (
               <div className="space-y-6">
+                {/* Visible & Active Download Updated CSV Banner when edits exist */}
+                {editedCount > 0 && (
+                  <div className="bg-emerald-50 border-2 border-emerald-400 rounded-lg p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all animate-fadeIn">
+                    <div className="flex items-start sm:items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 border border-emerald-200">
+                        <FileDown className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-emerald-950">
+                            {editedCount} Inventory Change{editedCount > 1 ? 's' : ''} Saved
+                          </h4>
+                          <span className="bg-emerald-200/90 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                            Ready for Export
+                          </span>
+                        </div>
+                        <p className="text-xs text-emerald-800 mt-0.5">
+                          Edits made in the room inspector are updated in active memory. Click the button to export the updated CSV file.
+                          {lastExportedTime && (
+                            <span className="font-semibold text-emerald-900 ml-1.5">
+                              (Last downloaded at {lastExportedTime})
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleDownloadUpdatedFile('xlsx')}
+                        className="px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-white border border-emerald-300 rounded hover:bg-emerald-100 transition-colors shadow-2xs"
+                      >
+                        Excel (.xlsx)
+                      </button>
+                      <button
+                        onClick={() => handleDownloadUpdatedFile('csv')}
+                        className="px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded shadow-xs transition-colors flex items-center gap-1.5"
+                      >
+                        <FileDown className="w-4 h-4" />
+                        <span>Download Updated CSV</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Fiscal Year Replacement Chart */}
                 <FiscalBudgetChart
                   budgets={fiscalBudgets}
                   selectedFY={selectedFY}
-                  onSelectFY={setSelectedFY}
+                  onSelectFY={handleSelectFY}
                 />
 
                 {/* Two-Column Grid: Next Quarter Action Card + What-If Simulation */}
@@ -321,7 +415,60 @@ export default function App() {
                 </div>
 
                 {/* Fleet Directory Section: Toggle between Bundled Rooms and Individual Assets */}
-                <div className="space-y-4">
+                <div id="fleet-directory-section" className="space-y-4 pt-2">
+                  {/* Dedicated FY Selection Alert / Focus Banner */}
+                  {selectedFY && (
+                    <div className="bg-sky-50 border-2 border-sky-300 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs animate-fadeIn">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                          {selectedFY}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-slate-900">
+                              {selectedFY} Replacement Schedule & CapEx
+                            </h4>
+                            <span className="bg-sky-200 text-sky-800 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
+                              Active Filter
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 mt-0.5">
+                            Displaying classroom packages and individual equipment due for overhaul in {selectedFY}.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => setDashboardDirectoryView('bundled')}
+                          className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors ${
+                            dashboardDirectoryView === 'bundled'
+                              ? 'bg-sky-700 text-white shadow-xs'
+                              : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          View Classroom Packages
+                        </button>
+                        <button
+                          onClick={() => setDashboardDirectoryView('components')}
+                          className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors ${
+                            dashboardDirectoryView === 'components'
+                              ? 'bg-sky-700 text-white shadow-xs'
+                              : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          View Individual Devices
+                        </button>
+                        <button
+                          onClick={() => setSelectedFY(null)}
+                          className="px-2.5 py-1.5 text-xs text-slate-500 hover:text-slate-800 font-medium underline"
+                        >
+                          Clear Filter
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-bold text-slate-900">
@@ -375,6 +522,8 @@ export default function App() {
                       packages={classroomPackages}
                       onSelectItem={handleOpenItem}
                       onOpenReportModal={() => setIsReportModalOpen(true)}
+                      selectedFY={selectedFY}
+                      onSelectFY={setSelectedFY}
                     />
                   ) : (
                     <InventoryTable
@@ -393,6 +542,8 @@ export default function App() {
                 packages={classroomPackages}
                 onSelectItem={handleOpenItem}
                 onOpenReportModal={() => setIsReportModalOpen(true)}
+                selectedFY={selectedFY}
+                onSelectFY={setSelectedFY}
               />
             )}
 

@@ -15,10 +15,18 @@ export const MaintenanceIssuesPanel: React.FC<MaintenanceIssuesPanelProps> = ({
 }) => {
   const [filterSeverity, setFilterSeverity] = useState<string>('all');
 
-  const issueItems = items.filter(
-    (it) => (it.activeIssue && it.activeIssue !== 'None' && it.activeIssue.trim() !== '') ||
-      it.maintenanceStatus !== 'Operational'
-  );
+  const issueItems = items.filter((it) => {
+    const hasActiveIssue =
+      it.activeIssue &&
+      it.activeIssue !== 'None' &&
+      it.activeIssue.toLowerCase() !== 'none' &&
+      it.activeIssue.toLowerCase() !== 'na' &&
+      it.activeIssue.toLowerCase() !== 'n/a' &&
+      it.activeIssue.toLowerCase() !== 'no' &&
+      it.activeIssue.trim() !== '';
+    const isProblemStatus = it.maintenanceStatus && it.maintenanceStatus !== 'Operational';
+    return Boolean(hasActiveIssue || isProblemStatus);
+  });
 
   const filteredIssues = issueItems.filter((it) => {
     if (filterSeverity === 'all') return true;
@@ -105,7 +113,16 @@ export const MaintenanceIssuesPanel: React.FC<MaintenanceIssuesPanelProps> = ({
           {filteredIssues.length === 0 ? (
             <div className="p-8 text-center text-slate-500 text-xs">
               <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-              No active maintenance tickets matching the selected filter.
+              {issueItems.length === 0 ? (
+                <>
+                  <div className="font-bold text-slate-800 text-sm mb-1">All Fleet Hardware Operational</div>
+                  <p className="max-w-md mx-auto text-slate-500">
+                    No active maintenance issues or service tickets found in this uploaded dataset. All {items.length} tracked items are in operational status.
+                  </p>
+                </>
+              ) : (
+                'No active maintenance tickets matching the selected filter.'
+              )}
             </div>
           ) : (
             filteredIssues.map((item) => {

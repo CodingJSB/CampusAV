@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ClassroomPackage, AVItem } from '../types/inventory';
 import {
   Boxes,
@@ -19,19 +19,48 @@ interface ClassroomPackagesViewProps {
   packages: ClassroomPackage[];
   onSelectItem: (item: AVItem) => void;
   onOpenReportModal: () => void;
+  selectedFY?: string | null;
+  onSelectFY?: (fy: string | null) => void;
 }
 
 export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
   packages,
   onSelectItem,
   onOpenReportModal,
+  selectedFY,
+  onSelectFY,
 }) => {
   const [expandedRooms, setExpandedRooms] = useState<Record<string, boolean>>({});
-  const [selectedFY, setSelectedFY] = useState<string>('all');
+  const [internalFY, setInternalFY] = useState<string>('all');
   const [selectedBuilding, setSelectedBuilding] = useState<string>('all');
+
+  const activeFY = selectedFY !== undefined && selectedFY !== null ? selectedFY : internalFY;
+
+  const handleFYChange = (newFY: string) => {
+    if (onSelectFY) {
+      onSelectFY(newFY === 'all' ? null : newFY);
+    } else {
+      setInternalFY(newFY);
+    }
+  };
 
   const buildings = useMemo(() => Array.from(new Set(packages.map((p) => p.building))).sort(), [packages]);
   const fiscalYears = useMemo(() => Array.from(new Set(packages.map((p) => p.projectedFiscalYear))).sort(), [packages]);
+
+  // Auto-expand packages when a specific FY filter is selected
+  useEffect(() => {
+    if (activeFY !== 'all') {
+      const expanded: Record<string, boolean> = {};
+      packages.forEach((p) => {
+        const matchesPackage = p.projectedFiscalYear === activeFY;
+        const matchesAnyItem = p.items.some((it) => it.replacementFiscalYear === activeFY);
+        if (matchesPackage || matchesAnyItem) {
+          expanded[`${p.building}-${p.roomName}`] = true;
+        }
+      });
+      setExpandedRooms((prev) => ({ ...prev, ...expanded }));
+    }
+  }, [activeFY, packages]);
 
   const toggleExpand = (roomKey: string) => {
     setExpandedRooms((prev) => ({ ...prev, [roomKey]: !prev[roomKey] }));
@@ -39,11 +68,15 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
 
   const filteredPackages = useMemo(() => {
     return packages.filter((pkg) => {
-      if (selectedFY !== 'all' && pkg.projectedFiscalYear !== selectedFY) return false;
+      if (activeFY !== 'all') {
+        const matchesPackage = pkg.projectedFiscalYear === activeFY;
+        const matchesAnyItem = pkg.items.some((it) => it.replacementFiscalYear === activeFY);
+        if (!matchesPackage && !matchesAnyItem) return false;
+      }
       if (selectedBuilding !== 'all' && pkg.building !== selectedBuilding) return false;
       return true;
     });
-  }, [packages, selectedFY, selectedBuilding]);
+  }, [packages, activeFY, selectedBuilding]);
 
   // Aggregate metrics
   const totalBundledCapEx = useMemo(
@@ -76,8 +109,8 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
           {/* Filter Bar */}
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <select
-              value={selectedFY}
-              onChange={(e) => setSelectedFY(e.target.value)}
+              value={activeFY}
+              onChange={(e) => handleFYChange(e.target.value)}
               className="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-slate-700 font-semibold"
             >
               <option value="all">All Overhaul Years</option>
@@ -270,7 +303,14 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
                             return (
                               <tr key={item.id} className="hover:bg-slate-50">
                                 <td className="py-2 px-3 font-sans text-slate-900 font-medium">
-                                  <div>{item.makeModel}</div>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span>{item.makeModel}</span>
+                                    {activeFY !== 'all' && item.replacementFiscalYear === activeFY && (
+                                      <span className="text-[9px] font-bold text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-300">
+                                        Scheduled {activeFY}
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="text-[10px] text-slate-400 font-mono">{item.serialNumber}</div>
                                 </td>
                                 <td className="py-2 px-3 font-sans text-slate-600">{item.category}</td>

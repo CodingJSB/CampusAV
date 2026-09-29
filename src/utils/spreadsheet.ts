@@ -13,22 +13,111 @@ function cleanKey(key: string): string {
 }
 
 /**
- * Maps category variations to known equipment categories
+ * Resolves equipment make/model and serial number strictly preserving raw input:
+ * - NEVER appends creative descriptions (e.g. "Vaddio" stays strictly "Vaddio").
+ * - If a single column was named "Equipment & Serial" or "Equipment & Serial #":
+ *   - Extracts embedded serial number if formatted like "Model - SN: 12345" or "Model (S/N 12345)"
+ *   - If no embedded serial exists (e.g. just "Vaddio"), keeps "Vaddio" as makeModel and defaults serialNumber to "NA".
  */
-function normalizeCategory(raw: string): EquipmentCategory {
-  const s = String(raw || '').toLowerCase();
-  if (s.includes('laser') && s.includes('proj')) return 'Laser Projector';
-  if (s.includes('proj')) return 'Lamp Projector';
-  if (s.includes('touch') || s.includes('interactive') || s.includes('smart') || s.includes('flip') || s.includes('aquos')) return 'Interactive Touch Display';
-  if (s.includes('flat') || s.includes('tv') || s.includes('display') || s.includes('panel') || s.includes('monitor')) return 'Commercial Flat Panel';
-  if (s.includes('switch') || s.includes('matrix') || s.includes('crestron') || s.includes('extron') || s.includes('processor')) return 'AV Matrix Switcher / Controller';
-  if (s.includes('audio') || s.includes('dsp') || s.includes('mic') || s.includes('shure') || s.includes('q-sys') || s.includes('biamp')) return 'Audio DSP & Mic Array';
-  if (s.includes('wireless') || s.includes('solstice') || s.includes('clickshare') || s.includes('barco') || s.includes('airmedia')) return 'Wireless Presentation Gateway';
-  if (s.includes('cam') || s.includes('ptz') || s.includes('hyflex') || s.includes('camera')) return 'HyFlex PTZ Camera';
-  if (s.includes('touchpanel') || s.includes('keypad') || s.includes('tlp') || s.includes('tsw')) return 'Control Touchpanel';
-  if (s.includes('assistive') || s.includes('listening') || s.includes('ada') || s.includes('fm') || s.includes('hearing')) return 'Assistive Listening System';
-  if (s.includes('doc') || s.includes('lectern') || s.includes('camera') || s.includes('podium') || s.includes('pc')) return 'Lectern PC & Doc Cam';
-  return 'Laser Projector';
+export function resolveEquipmentAndSerial(
+  rawEquipment: any,
+  rawSerial: any,
+  isSameColumn: boolean = false
+): { makeModel: string; serialNumber: string } {
+  let eq = String(rawEquipment || '').trim();
+  let sn = String(rawSerial || '').trim();
+
+  // If both were mapped to the exact same column, or rawSerial is duplicate of eq
+  if (isSameColumn || (eq && (!sn || sn === eq))) {
+    // Check if eq contains an explicit serial pattern like " - S/N: 12345", " / SN: 12345", "(SN: 12345)"
+    const match = eq.match(/^(.*?)\s*[-/|(,]\s*(?:s\/?n|serial|sn#?|tag)[:\s#]*([A-Za-z0-9_-]+)\)?$/i);
+    if (match && match[1] && match[2]) {
+      return {
+        makeModel: match[1].trim() || eq,
+        serialNumber: match[2].trim(),
+      };
+    }
+    return {
+      makeModel: eq || 'Standard AV Device',
+      serialNumber: sn && sn !== eq ? sn : 'NA',
+    };
+  }
+
+  return {
+    makeModel: eq || 'Standard AV Device',
+    serialNumber: sn || 'NA',
+  };
+}
+
+/**
+ * Resolves equipment category strictly respecting user data:
+ * 1. If the CSV has a category value, use it directly (preserving the user's category name).
+ * 2. Does NOT creatively force "Projector" into "Laser Projector" vs "Lamp Projector".
+ * 3. Only if the category is empty, apply a conservative, non-aggressive fallback.
+ * 4. Never default unmatched items to "Laser Projector" (use "Other AV Equipment").
+ */
+export function resolveCategory(rawCategory: any, makeModel: string = ''): string {
+  const trimmed = String(rawCategory || '').trim();
+  if (trimmed) {
+    return trimmed;
+  }
+
+  // Only if category is blank in CSV, fallback conservatively based on model/name:
+  const s = String(makeModel || '').toLowerCase().trim();
+  if (!s || s === 'standard av device') {
+    return 'Other AV Equipment';
+  }
+
+  // Check Screen first so "Projector Screen" isn't miscategorized as a Projector
+  if (s.includes('screen') || s.includes('da-lite') || s.includes('draper')) {
+    return 'Screen';
+  }
+
+  // Factual, simple Projector categorization - no guesswork on laser vs lamp
+  if (s.includes('projector') || s.includes('proj')) {
+    if (s.includes('short throw') || s.includes('short-throw')) {
+      return 'Projector (Short-throw)';
+    }
+    return 'Projector';
+  }
+
+  if (s.includes('touch') || s.includes('interactive') || s.includes('smart board') || s.includes('smartboard')) {
+    return 'Interactive Touch Display';
+  }
+
+  if (s.includes('flat') || s.includes('panel') || s.includes('tv') || s.includes('display') || s.includes('monitor')) {
+    return 'Commercial Flat Panel';
+  }
+
+  if (s.includes('switch') || s.includes('matrix')) {
+    return 'AV Matrix Switcher / Controller';
+  }
+
+  if (s.includes('controller') || s.includes('touchpanel') || s.includes('keypad')) {
+    return 'Control Touchpanel';
+  }
+
+  if (s.includes('camera') || s.includes('ptz') || s.includes('webcam')) {
+    return 'HyFlex PTZ Camera';
+  }
+
+  if (s.includes('mic') || s.includes('audio') || s.includes('dsp') || s.includes('speaker') || s.includes('soundbar') || s.includes('amplifier')) {
+    return 'Audio DSP & Mic Array';
+  }
+
+  if (s.includes('wireless') || s.includes('solstice') || s.includes('clickshare') || s.includes('airmedia')) {
+    return 'Wireless Presentation Gateway';
+  }
+
+  if (s.includes('doc') || s.includes('document') || s.includes('elmo') || s.includes('wolfvision')) {
+    return 'Lectern PC & Doc Cam';
+  }
+
+  if (s.includes('assistive') || s.includes('hearing') || s.includes('ada')) {
+    return 'Assistive Listening System';
+  }
+
+  return 'Other AV Equipment';
 }
 
 function normalizeCondition(raw: string): EquipmentCondition {
@@ -40,12 +129,80 @@ function normalizeCondition(raw: string): EquipmentCondition {
   return 'Good';
 }
 
-function normalizeMaintenanceStatus(raw: string): MaintenanceStatus {
-  const s = String(raw || '').toLowerCase();
-  if (s.includes('out') || s.includes('down') || s.includes('offline') || s.includes('inoperable')) return 'Out of Service';
-  if (s.includes('sched') || s.includes('pending') || s.includes('progress') || s.includes('work in')) return 'Scheduled Repair';
-  if (s.includes('req') || s.includes('need') || s.includes('issue') || s.includes('warn') || s.includes('error')) return 'Requires Service';
+function normalizeMaintenanceStatus(raw: any): MaintenanceStatus {
+  if (!raw) return 'Operational';
+  const s = String(raw).toLowerCase().trim();
+  if (
+    !s ||
+    s === 'none' ||
+    s === 'na' ||
+    s === 'n/a' ||
+    s === 'operational' ||
+    s === 'good' ||
+    s === 'active' ||
+    s === 'in use' ||
+    s === 'working' ||
+    s === 'ok' ||
+    s === 'installed' ||
+    s === 'existing' ||
+    s === 'deployed'
+  ) {
+    return 'Operational';
+  }
+  // Only flag if explicit maintenance terminology is present
+  if (
+    s === 'out of service' ||
+    s.includes('out of service') ||
+    s === 'offline' ||
+    s === 'broken' ||
+    s === 'inoperable' ||
+    s === 'down'
+  ) {
+    return 'Out of Service';
+  }
+  if (
+    s === 'scheduled repair' ||
+    s.includes('scheduled repair') ||
+    s === 'in repair' ||
+    s.includes('repair scheduled') ||
+    s.includes('pending repair')
+  ) {
+    return 'Scheduled Repair';
+  }
+  if (
+    s === 'requires service' ||
+    s.includes('requires service') ||
+    s.includes('needs repair') ||
+    s.includes('maintenance required') ||
+    s === 'faulty' ||
+    s === 'defective'
+  ) {
+    return 'Requires Service';
+  }
   return 'Operational';
+}
+
+function normalizeActiveIssue(raw: any): string {
+  if (!raw) return 'None';
+  const s = String(raw).trim();
+  const lower = s.toLowerCase();
+  if (
+    !s ||
+    lower === 'none' ||
+    lower === 'na' ||
+    lower === 'n/a' ||
+    lower === 'no' ||
+    lower === '-' ||
+    lower === 'nil' ||
+    lower === 'null' ||
+    lower === 'operational' ||
+    lower === 'ok' ||
+    lower === 'good' ||
+    lower === 'normal'
+  ) {
+    return 'None';
+  }
+  return s;
 }
 
 function normalizeDate(raw: any): string {
@@ -79,12 +236,14 @@ function normalizeDate(raw: any): string {
 }
 
 export function getDefaultCostForCategory(category: string, model: string): number {
-  const s = `${category} ${model}`.toLowerCase();
+  const cat = String(category || '').toLowerCase();
+  const mod = String(model || '').toLowerCase();
+  const s = `${cat} ${mod}`;
+  if (cat.includes('screen') || mod.includes('screen') || mod.includes('da-lite') || mod.includes('draper')) return 1250;
   if (s.includes('dmps') || s.includes('matrix') || s.includes('nvx')) return 6800;
   if (s.includes('switcher')) return 4500;
   if (s.includes('short-throw') || s.includes('short throw')) return 2800;
   if (s.includes('projector') || s.includes('phz') || s.includes('l630') || s.includes('epson') || s.includes('sony')) return 3500;
-  if (s.includes('screen') || s.includes('da-lite') || s.includes('draper')) return 1250;
   if (s.includes('flat') || s.includes('panel') || s.includes('samsung')) return 1800;
   if (s.includes('wireless') || s.includes('airmedia') || s.includes('clickshare') || s.includes('solstice')) return 1400;
   if (s.includes('document') || s.includes('wolfvision') || s.includes('doc cam') || s.includes('elpdc')) return 1100;
@@ -145,10 +304,25 @@ export interface SpreadsheetInspection {
  */
 export function detectSuggestedMapping(headers: string[]): ColumnMapping {
   const findMatch = (...aliases: string[]) => {
+    // 1st pass: exact match on clean key
     for (const alias of aliases) {
       const cleanAlias = cleanKey(alias);
       for (const h of headers) {
-        if (cleanKey(h) === cleanAlias || cleanKey(h).includes(cleanAlias)) {
+        if (cleanKey(h) === cleanAlias) {
+          return h;
+        }
+      }
+    }
+    // 2nd pass: contains match, filtering out common false positives
+    for (const alias of aliases) {
+      const cleanAlias = cleanKey(alias);
+      for (const h of headers) {
+        const cleanedH = cleanKey(h);
+        if (cleanedH.includes(cleanAlias)) {
+          // If checking for 'type', prevent matching 'typeofspace', 'spacetype', or 'roomtype'
+          if (cleanAlias === 'type' && (cleanedH.includes('space') || cleanedH.includes('room'))) {
+            continue;
+          }
           return h;
         }
       }
@@ -161,7 +335,7 @@ export function detectSuggestedMapping(headers: string[]): ColumnMapping {
     roomName: findMatch('roomname', 'name', 'spacename', 'lab'),
     building: findMatch('building', 'facility', 'complex', 'hall', 'campus', 'dept'),
     spaceType: findMatch('typeofspace', 'spacetype', 'roomtype', 'space', 'usage'),
-    category: findMatch('equipmentcategory', 'category', 'type', 'equipmenttype', 'devicetype', 'class'),
+    category: findMatch('category', 'equipmentcategory', 'equipcategory', 'equipmenttype', 'equiptype', 'itemtype', 'devicetype', 'hardwarecategory', 'classification', 'type', 'class', 'group'),
     makeModel: findMatch('makemodel', 'model', 'equipment', 'item', 'device', 'name', 'description', 'hardware'),
     serialNumber: findMatch('serialnumber', 'serial', 'sn', 'assettag', 'tag', 'barcode', 'id'),
     installDate: findMatch('installdate', 'dateinstalled', 'purchasedate', 'acquisitiondate', 'installyear', 'date'),
@@ -170,11 +344,11 @@ export function detectSuggestedMapping(headers: string[]): ColumnMapping {
     replacementCost: findMatch('replacementcost', 'hardwarecost', 'cost', 'unitcost', 'price', 'estimate', 'budget'),
     installationLaborCost: findMatch('installationlaborcost', 'laborcost', 'installationcost', 'labor', 'services'),
     condition: findMatch('condition', 'state', 'health', 'quality'),
-    maintenanceStatus: findMatch('status', 'maintenancestatus', 'repair', 'ticket', 'operationalstatus'),
-    activeIssue: findMatch('activeissue', 'issue', 'problem', 'ticketnotes', 'defect', 'comments'),
+    maintenanceStatus: findMatch('maintenancestatus', 'maintenance', 'servicestatus', 'repairhealth', 'hardwarestatus'),
+    activeIssue: findMatch('activeissue', 'maintenanceticket', 'serviceticket', 'maintenanceissue', 'defect', 'hardwarefault', 'repairissue'),
     assignedTech: findMatch('assignedtech', 'tech', 'technician', 'lead', 'owner'),
     vendor: findMatch('vendor', 'integrator', 'contractor', 'partner'),
-    notes: findMatch('notes', 'remarks', 'memo'),
+    notes: findMatch('notes', 'comments', 'remarks', 'memo', 'description'),
   };
 }
 
@@ -215,9 +389,13 @@ export function processRowsWithMapping(rawData: Record<string, any>[], mapping: 
     const roomName = getVal(mapping.roomName) || '';
     const building = getVal(mapping.building) || 'Main Campus';
     const spaceType = getVal(mapping.spaceType) || '';
-    const makeModel = getVal(mapping.makeModel) || 'Standard AV Device';
-    const category = normalizeCategory(getVal(mapping.category) || makeModel);
-    const serialNumber = getVal(mapping.serialNumber) || 'NA';
+
+    const rawEq = getVal(mapping.makeModel);
+    const rawSn = getVal(mapping.serialNumber);
+    const isSameColumn = Boolean(mapping.makeModel && mapping.makeModel === mapping.serialNumber);
+    const { makeModel, serialNumber } = resolveEquipmentAndSerial(rawEq, rawSn, isSameColumn);
+
+    const category = resolveCategory(getVal(mapping.category), makeModel);
     const rawDate = getVal(mapping.installDate) || getVal(mapping.installYear);
     const installDate = normalizeDate(rawDate);
     const installYear = getVal(mapping.installYear) || (installDate ? installDate.slice(0, 4) : 2025);
@@ -234,7 +412,7 @@ export function processRowsWithMapping(rawData: Record<string, any>[], mapping: 
 
     const condition = normalizeCondition(getVal(mapping.condition));
     const maintenanceStatus = normalizeMaintenanceStatus(getVal(mapping.maintenanceStatus));
-    const activeIssue = getVal(mapping.activeIssue) || 'None';
+    const activeIssue = normalizeActiveIssue(getVal(mapping.activeIssue));
     const assignedTech = getVal(mapping.assignedTech) || 'AVC AV Support';
     const vendor = getVal(mapping.vendor) || 'AVC';
     const notes = getVal(mapping.notes) || '';
@@ -318,9 +496,11 @@ export async function parseSpreadsheetFile(file: File): Promise<{
 
     const room = findVal('room', 'classroom', 'roomnumber', 'space', 'location') || `Classroom ${index + 101}`;
     const building = findVal('building', 'facility', 'complex', 'hall', 'campus') || 'Main Campus';
-    const makeModel = findVal('makemodel', 'model', 'equipment', 'item', 'device', 'name', 'description') || 'Standard AV Device';
-    const category = normalizeCategory(findVal('category', 'type', 'equipmenttype', 'devicetype', 'class') || makeModel);
-    const serialNumber = findVal('serialnumber', 'serial', 'sn', 'assettag', 'tag', 'id') || `TAG-${1000 + index}`;
+    const rawEq = findVal('equipmentandserial', 'equipmentserial', 'equipment', 'makemodel', 'model', 'item', 'device', 'name', 'description');
+    const rawSn = findVal('serialnumber', 'serialno', 'serialnum', 'sn', 'assettag', 'tag', 'serial', 'id');
+    const { makeModel, serialNumber } = resolveEquipmentAndSerial(rawEq, rawSn, false);
+    const rawCategory = findVal('category', 'equipmentcategory', 'equipcategory', 'equipmenttype', 'equiptype', 'itemtype', 'devicetype', 'type', 'class', 'group');
+    const category = resolveCategory(rawCategory, makeModel);
     const installDate = normalizeDate(findVal('installdate', 'purchased', 'dateinstalled', 'purchasedate', 'date', 'year'));
     
     // Shelflife
@@ -335,8 +515,8 @@ export async function parseSpreadsheetFile(file: File): Promise<{
     const installationLaborCost = Number(rawLabor) >= 0 ? Number(rawLabor) : Math.round(replacementCost * 0.15);
 
     const condition = normalizeCondition(findVal('condition', 'state', 'health'));
-    const maintenanceStatus = normalizeMaintenanceStatus(findVal('maintenancestatus', 'status', 'repair', 'ticket'));
-    const activeIssue = findVal('activeissue', 'issue', 'problem', 'ticketnotes', 'defect') || 'None';
+    const maintenanceStatus = normalizeMaintenanceStatus(findVal('maintenancestatus', 'servicestatus', 'hardwarestatus', 'maintenance'));
+    const activeIssue = normalizeActiveIssue(findVal('activeissue', 'maintenanceticket', 'serviceticket', 'maintenanceissue', 'defect'));
     const assignedTech = findVal('assignedtech', 'tech', 'technician', 'lead') || 'AV Campus Team';
     const notes = findVal('notes', 'comments', 'memo') || '';
 
@@ -440,11 +620,13 @@ export function downloadTemplateSpreadsheet(format: 'xlsx' | 'csv' = 'xlsx') {
 /**
  * Exports current active items to Excel or CSV
  */
-export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 'xlsx') {
+export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 'xlsx', customFilename?: string) {
   const exportRows = items.map((item) => ({
     'Asset ID': item.id,
     'Building': item.building,
     'Room': item.room,
+    'Room Name': item.roomName || '',
+    'Type of Space': item.spaceType || '',
     'Category': item.category,
     'Make & Model': item.makeModel,
     'Serial Number': item.serialNumber,
@@ -455,13 +637,14 @@ export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 
     'Lifecycle Status': item.lifecycleStatus,
     'Replacement Fiscal Year': item.replacementFiscalYear,
     'Scheduled Quarter': item.scheduledQuarter || '',
-    'Replacement Hardware Cost ($)': item.replacementCost,
+    'Replacement Cost ($)': item.replacementCost,
     'Installation Labor Cost ($)': item.installationLaborCost,
     'Total Replacement Cost ($)': item.totalReplacementCost,
     'Physical Condition': item.condition,
     'Maintenance Status': item.maintenanceStatus,
     'Active Issue': item.activeIssue || 'None',
     'Assigned Technician': item.assignedTech || '',
+    'Vendor': item.vendor || '',
     'Notes': item.notes || '',
   }));
 
@@ -469,6 +652,6 @@ export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'AV Fleet Inventory');
 
-  const filename = `College_AV_Inventory_Export_${new Date().toISOString().split('T')[0]}.${format}`;
+  const filename = customFilename || `College_AV_Inventory_Export_${new Date().toISOString().split('T')[0]}.${format}`;
   XLSX.writeFile(workbook, filename, { bookType: format });
 }

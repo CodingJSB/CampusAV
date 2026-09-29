@@ -104,16 +104,27 @@ export function enrichAVItem(
 }
 
 /**
- * Aggregates fiscal year budget projections for 6 years (e.g., FY26 to FY31)
+ * Aggregates fiscal year budget projections across all forecasted years chronologically
  */
 export function calculateFiscalYearBudgets(items: AVItem[], baseYear?: number): FiscalYearBudget[] {
   const currentFY = getFiscalYearFromDate(SYSTEM_NOW);
   const currentYearNum = baseYear || parseInt(currentFY.replace('FY', ''), 10) || 2026;
 
-  // Generate 6 years of projections: currentFY and next 5 years
+  // Determine maximum projected year across all items (minimum 6 years projection)
+  let maxYearNum = currentYearNum + 5;
+  items.forEach((item) => {
+    if (item.replacementFiscalYear) {
+      const parsedYear = parseInt(item.replacementFiscalYear.replace('FY', ''), 10);
+      if (!isNaN(parsedYear) && parsedYear > maxYearNum) {
+        maxYearNum = parsedYear;
+      }
+    }
+  });
+
+  // Generate continuous chronological fiscal years from current year to max projected year
   const fiscalYears: string[] = [];
-  for (let i = 0; i < 6; i++) {
-    fiscalYears.push(`FY${currentYearNum + i}`);
+  for (let y = currentYearNum; y <= maxYearNum; y++) {
+    fiscalYears.push(`FY${y}`);
   }
 
   const budgetMap: Record<string, FiscalYearBudget> = {};
@@ -130,27 +141,27 @@ export function calculateFiscalYearBudgets(items: AVItem[], baseYear?: number): 
   });
 
   items.forEach((item) => {
-    // If overdue, place in the current fiscal year (urgent budget)
-    let fy = item.replacementFiscalYear;
+    // If overdue or older than current FY, place in the current fiscal year (urgent budget)
+    let fy = item.replacementFiscalYear || fiscalYears[0];
+    const itemFYNum = parseInt(fy.replace('FY', ''), 10);
+    if (isNaN(itemFYNum) || itemFYNum < currentYearNum) {
+      fy = fiscalYears[0];
+    } else if (itemFYNum > maxYearNum) {
+      fy = fiscalYears[fiscalYears.length - 1];
+    }
+
     if (!budgetMap[fy]) {
-      // If beyond 6 years, cap or place in the last bucket if older
-      const itemFYNum = parseInt(fy.replace('FY', ''), 10);
-      if (itemFYNum < currentYearNum) {
-        fy = fiscalYears[0];
-      } else {
-        // We can dynamically add or place in later bucket
-        if (!budgetMap[fy]) {
-          budgetMap[fy] = {
-            fiscalYear: fy,
-            hardwareCost: 0,
-            laborCost: 0,
-            totalCost: 0,
-            itemCount: 0,
-            categories: {},
-            items: [],
-          };
-          fiscalYears.push(fy);
-        }
+      budgetMap[fy] = {
+        fiscalYear: fy,
+        hardwareCost: 0,
+        laborCost: 0,
+        totalCost: 0,
+        itemCount: 0,
+        categories: {},
+        items: [],
+      };
+      if (!fiscalYears.includes(fy)) {
+        fiscalYears.push(fy);
       }
     }
 
@@ -162,6 +173,9 @@ export function calculateFiscalYearBudgets(items: AVItem[], baseYear?: number): 
     b.items.push(item);
     b.categories[item.category] = (b.categories[item.category] || 0) + item.totalReplacementCost;
   });
+
+  // Sort strictly in ascending chronological order
+  fiscalYears.sort((a, b) => parseInt(a.replace('FY', ''), 10) - parseInt(b.replace('FY', ''), 10));
 
   return fiscalYears.map((fy) => budgetMap[fy]).filter(Boolean);
 }

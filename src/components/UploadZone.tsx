@@ -215,7 +215,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
               { key: 'building', label: 'Building / Hall' },
               { key: 'spaceType', label: 'Type of Space' },
               { key: 'category', label: 'Equipment Category' },
-              { key: 'makeModel', label: 'Make & Model / Hardware', required: true },
+              { key: 'makeModel', label: 'Make & Model / Equipment', required: true },
               { key: 'serialNumber', label: 'Serial Number / Asset Tag' },
               { key: 'installDate', label: 'Install Date / Year' },
               { key: 'shelflifeYears', label: 'Shelflife (Years)' },
