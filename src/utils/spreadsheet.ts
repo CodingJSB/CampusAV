@@ -1,0 +1,435 @@
+import * as XLSX from 'xlsx';
+import { AVItem, EquipmentCategory, EquipmentCondition, MaintenanceStatus } from '../types/inventory';
+import { enrichAVItem } from './calculations';
+
+/**
+ * Normalizes string keys for flexible header matching
+ */
+function cleanKey(key: string): string {
+  return String(key || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Maps category variations to known equipment categories
+ */
+function normalizeCategory(raw: string): EquipmentCategory {
+  const s = String(raw || '').toLowerCase();
+  if (s.includes('laser') && s.includes('proj')) return 'Laser Projector';
+  if (s.includes('proj')) return 'Lamp Projector';
+  if (s.includes('touch') || s.includes('interactive') || s.includes('smart') || s.includes('flip') || s.includes('aquos')) return 'Interactive Touch Display';
+  if (s.includes('flat') || s.includes('tv') || s.includes('display') || s.includes('panel') || s.includes('monitor')) return 'Commercial Flat Panel';
+  if (s.includes('switch') || s.includes('matrix') || s.includes('crestron') || s.includes('extron') || s.includes('processor')) return 'AV Matrix Switcher / Controller';
+  if (s.includes('audio') || s.includes('dsp') || s.includes('mic') || s.includes('shure') || s.includes('q-sys') || s.includes('biamp')) return 'Audio DSP & Mic Array';
+  if (s.includes('wireless') || s.includes('solstice') || s.includes('clickshare') || s.includes('barco') || s.includes('airmedia')) return 'Wireless Presentation Gateway';
+  if (s.includes('cam') || s.includes('ptz') || s.includes('hyflex') || s.includes('camera')) return 'HyFlex PTZ Camera';
+  if (s.includes('touchpanel') || s.includes('keypad') || s.includes('tlp') || s.includes('tsw')) return 'Control Touchpanel';
+  if (s.includes('assistive') || s.includes('listening') || s.includes('ada') || s.includes('fm') || s.includes('hearing')) return 'Assistive Listening System';
+  if (s.includes('doc') || s.includes('lectern') || s.includes('camera') || s.includes('podium') || s.includes('pc')) return 'Lectern PC & Doc Cam';
+  return 'Laser Projector';
+}
+
+function normalizeCondition(raw: string): EquipmentCondition {
+  const s = String(raw || '').toLowerCase();
+  if (s.includes('crit') || s.includes('fail') || s.includes('broken')) return 'Critical';
+  if (s.includes('poor') || s.includes('bad') || s.includes('degrad')) return 'Poor';
+  if (s.includes('fair') || s.includes('mod') || s.includes('avg')) return 'Fair';
+  if (s.includes('excel') || s.includes('new') || s.includes('pristine')) return 'Excellent';
+  return 'Good';
+}
+
+function normalizeMaintenanceStatus(raw: string): MaintenanceStatus {
+  const s = String(raw || '').toLowerCase();
+  if (s.includes('out') || s.includes('down') || s.includes('offline') || s.includes('inoperable')) return 'Out of Service';
+  if (s.includes('sched') || s.includes('pending') || s.includes('progress') || s.includes('work in')) return 'Scheduled Repair';
+  if (s.includes('req') || s.includes('need') || s.includes('issue') || s.includes('warn') || s.includes('error')) return 'Requires Service';
+  return 'Operational';
+}
+
+function normalizeDate(raw: any): string {
+  if (!raw) return '2022-01-01';
+  // If Excel serial number date
+  if (typeof raw === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(raw);
+    if (parsed) {
+      const y = parsed.y;
+      const m = String(parsed.m).padStart(2, '0');
+      const d = String(parsed.d).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  }
+
+  const d = new Date(raw);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  return '2022-01-01';
+}
+
+function getDefaultLifespan(category: EquipmentCategory): number {
+  switch (category) {
+    case 'Laser Projector': return 5;
+    case 'Lamp Projector': return 4;
+    case 'Interactive Touch Display': return 6;
+    case 'Commercial Flat Panel': return 6;
+    case 'AV Matrix Switcher / Controller': return 7;
+    case 'Audio DSP & Mic Array': return 8;
+    case 'Wireless Presentation Gateway': return 4;
+    case 'HyFlex PTZ Camera': return 5;
+    case 'Control Touchpanel': return 6;
+    case 'Assistive Listening System': return 8;
+    case 'Lectern PC & Doc Cam': return 4;
+    default: return 5;
+  }
+}
+
+export interface ColumnMapping {
+  room: string;
+  building: string;
+  category: string;
+  makeModel: string;
+  serialNumber: string;
+  installDate: string;
+  shelflifeYears: string;
+  replacementCost: string;
+  installationLaborCost: string;
+  condition: string;
+  maintenanceStatus: string;
+  activeIssue: string;
+  assignedTech: string;
+  notes: string;
+}
+
+export interface SpreadsheetInspection {
+  headers: string[];
+  sampleRows: Record<string, any>[];
+  suggestedMapping: ColumnMapping;
+  totalRows: number;
+  filename: string;
+  rawData: Record<string, any>[];
+}
+
+/**
+ * Auto-detects suggested mapping for raw headers
+ */
+export function detectSuggestedMapping(headers: string[]): ColumnMapping {
+  const findMatch = (...aliases: string[]) => {
+    for (const alias of aliases) {
+      const cleanAlias = cleanKey(alias);
+      for (const h of headers) {
+        if (cleanKey(h) === cleanAlias || cleanKey(h).includes(cleanAlias)) {
+          return h;
+        }
+      }
+    }
+    return '';
+  };
+
+  return {
+    room: findMatch('room', 'classroom', 'roomnumber', 'space', 'location', 'rm'),
+    building: findMatch('building', 'facility', 'complex', 'hall', 'campus', 'dept'),
+    category: findMatch('category', 'type', 'equipmenttype', 'devicetype', 'class'),
+    makeModel: findMatch('makemodel', 'model', 'equipment', 'item', 'device', 'name', 'description', 'hardware'),
+    serialNumber: findMatch('serialnumber', 'serial', 'sn', 'assettag', 'tag', 'barcode', 'id'),
+    installDate: findMatch('installdate', 'purchased', 'dateinstalled', 'purchasedate', 'acquisitiondate', 'date', 'year'),
+    shelflifeYears: findMatch('shelflifeyears', 'shelflife', 'lifespan', 'shelflifeyrs', 'expectedlife', 'cycle', 'useful life'),
+    replacementCost: findMatch('replacementcost', 'hardwarecost', 'cost', 'unitcost', 'price', 'estimate', 'budget'),
+    installationLaborCost: findMatch('installationlaborcost', 'laborcost', 'installationcost', 'labor', 'services'),
+    condition: findMatch('condition', 'state', 'health', 'quality'),
+    maintenanceStatus: findMatch('maintenancestatus', 'status', 'repair', 'ticket', 'operationalstatus'),
+    activeIssue: findMatch('activeissue', 'issue', 'problem', 'ticketnotes', 'defect', 'comments'),
+    assignedTech: findMatch('assignedtech', 'tech', 'technician', 'lead', 'owner'),
+    notes: findMatch('notes', 'remarks', 'memo'),
+  };
+}
+
+/**
+ * Inspects a spreadsheet and returns headers, sample rows, and suggested mappings
+ */
+export async function inspectSpreadsheet(file: File): Promise<SpreadsheetInspection> {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) throw new Error('Spreadsheet has no sheets.');
+
+  const worksheet = workbook.Sheets[sheetName];
+  const rawData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+  if (rawData.length === 0) throw new Error('Spreadsheet contains no data rows.');
+
+  const headers = Object.keys(rawData[0] || {});
+  const suggestedMapping = detectSuggestedMapping(headers);
+
+  return {
+    headers,
+    sampleRows: rawData.slice(0, 3),
+    suggestedMapping,
+    totalRows: rawData.length,
+    filename: file.name,
+    rawData,
+  };
+}
+
+/**
+ * Parses raw data rows into enriched AV items using specified column mapping
+ */
+export function processRowsWithMapping(rawData: Record<string, any>[], mapping: ColumnMapping, filename: string): AVItem[] {
+  return rawData.map((row, index) => {
+    const getVal = (col: string) => (col && row[col] !== undefined ? row[col] : '');
+
+    const room = getVal(mapping.room) || `Classroom ${index + 101}`;
+    const building = getVal(mapping.building) || 'Main Campus';
+    const makeModel = getVal(mapping.makeModel) || 'Standard AV Device';
+    const category = normalizeCategory(getVal(mapping.category) || makeModel);
+    const serialNumber = getVal(mapping.serialNumber) || `TAG-${1000 + index}`;
+    const installDate = normalizeDate(getVal(mapping.installDate));
+
+    const rawLifespan = getVal(mapping.shelflifeYears);
+    const shelflifeYears = Number(rawLifespan) > 0 ? Number(rawLifespan) : getDefaultLifespan(category);
+
+    const rawCost = getVal(mapping.replacementCost);
+    const replacementCost = Number(rawCost) > 0 ? Number(rawCost) : 3200;
+
+    const rawLabor = getVal(mapping.installationLaborCost);
+    const installationLaborCost = Number(rawLabor) >= 0 && rawLabor !== '' ? Number(rawLabor) : Math.round(replacementCost * 0.15);
+
+    const condition = normalizeCondition(getVal(mapping.condition));
+    const maintenanceStatus = normalizeMaintenanceStatus(getVal(mapping.maintenanceStatus));
+    const activeIssue = getVal(mapping.activeIssue) || 'None';
+    const assignedTech = getVal(mapping.assignedTech) || 'AV Campus Team';
+    const notes = getVal(mapping.notes) || '';
+
+    const id = `AV-${String(building).slice(0, 3).toUpperCase()}-${index + 101}`;
+
+    return enrichAVItem({
+      id,
+      room: String(room).trim(),
+      building: String(building).trim(),
+      category,
+      makeModel: String(makeModel).trim(),
+      serialNumber: String(serialNumber).trim(),
+      installDate,
+      shelflifeYears,
+      replacementCost,
+      installationLaborCost,
+      condition,
+      maintenanceStatus,
+      activeIssue: String(activeIssue).trim(),
+      assignedTech: String(assignedTech).trim(),
+      notes: String(notes).trim(),
+    });
+  });
+}
+
+/**
+ * Parses user-uploaded Excel or CSV file directly in browser
+ */
+export async function parseSpreadsheetFile(file: File): Promise<{
+  items: AVItem[];
+  errors: string[];
+  filename: string;
+  totalRowsParsed: number;
+}> {
+  const errors: string[] = [];
+  const buffer = await file.arrayBuffer();
+  
+  const workbook = XLSX.read(buffer, {
+    type: 'array',
+    cellDates: true,
+  });
+
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) {
+    throw new Error('Spreadsheet has no sheets.');
+  }
+
+  const worksheet = workbook.Sheets[firstSheetName];
+  const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
+    defval: '',
+  });
+
+  if (jsonData.length === 0) {
+    throw new Error('Spreadsheet contains no data rows.');
+  }
+
+  const items: AVItem[] = [];
+
+  jsonData.forEach((row, index) => {
+    // Build lookup map with cleaned keys
+    const rowMap: Record<string, any> = {};
+    Object.keys(row).forEach((key) => {
+      rowMap[cleanKey(key)] = row[key];
+    });
+
+    // Helper to find matching column value
+    const findVal = (...aliases: string[]) => {
+      for (const alias of aliases) {
+        const clean = cleanKey(alias);
+        if (rowMap[clean] !== undefined && rowMap[clean] !== '') {
+          return rowMap[clean];
+        }
+      }
+      return undefined;
+    };
+
+    const room = findVal('room', 'classroom', 'roomnumber', 'space', 'location') || `Classroom ${index + 101}`;
+    const building = findVal('building', 'facility', 'complex', 'hall', 'campus') || 'Main Campus';
+    const makeModel = findVal('makemodel', 'model', 'equipment', 'item', 'device', 'name', 'description') || 'Standard AV Device';
+    const category = normalizeCategory(findVal('category', 'type', 'equipmenttype', 'devicetype', 'class') || makeModel);
+    const serialNumber = findVal('serialnumber', 'serial', 'sn', 'assettag', 'tag', 'id') || `TAG-${1000 + index}`;
+    const installDate = normalizeDate(findVal('installdate', 'purchased', 'dateinstalled', 'purchasedate', 'date', 'year'));
+    
+    // Shelflife
+    const rawLifespan = findVal('shelflifeyears', 'shelflife', 'lifespan', 'shelflifeyrs', 'expectedlife', 'cycle');
+    const shelflifeYears = Number(rawLifespan) > 0 ? Number(rawLifespan) : getDefaultLifespan(category);
+
+    // Costs
+    const rawCost = findVal('replacementcost', 'hardwarecost', 'cost', 'unitcost', 'price', 'estimate');
+    const replacementCost = Number(rawCost) > 0 ? Number(rawCost) : 3200;
+
+    const rawLabor = findVal('installationlaborcost', 'laborcost', 'installationcost', 'labor', 'servicecost');
+    const installationLaborCost = Number(rawLabor) >= 0 ? Number(rawLabor) : Math.round(replacementCost * 0.15);
+
+    const condition = normalizeCondition(findVal('condition', 'state', 'health'));
+    const maintenanceStatus = normalizeMaintenanceStatus(findVal('maintenancestatus', 'status', 'repair', 'ticket'));
+    const activeIssue = findVal('activeissue', 'issue', 'problem', 'ticketnotes', 'defect') || 'None';
+    const assignedTech = findVal('assignedtech', 'tech', 'technician', 'lead') || 'AV Campus Team';
+    const notes = findVal('notes', 'comments', 'memo') || '';
+
+    const id = findVal('id', 'assetid') || `AV-${building.slice(0, 3).toUpperCase()}-${index + 101}`;
+
+    const enriched = enrichAVItem({
+      id,
+      room: String(room).trim(),
+      building: String(building).trim(),
+      category,
+      makeModel: String(makeModel).trim(),
+      serialNumber: String(serialNumber).trim(),
+      installDate,
+      shelflifeYears,
+      replacementCost,
+      installationLaborCost,
+      condition,
+      maintenanceStatus,
+      activeIssue: String(activeIssue).trim(),
+      assignedTech: String(assignedTech).trim(),
+      notes: String(notes).trim(),
+    });
+
+    items.push(enriched);
+  });
+
+  return {
+    items,
+    errors,
+    filename: file.name,
+    totalRowsParsed: jsonData.length,
+  };
+}
+
+/**
+ * Downloads a spreadsheet template for college AV departments
+ */
+export function downloadTemplateSpreadsheet(format: 'xlsx' | 'csv' = 'xlsx') {
+  const headers = [
+    {
+      'Asset ID': 'AV-SCI-101',
+      'Building': 'Science & Technology Hall',
+      'Room / Space': 'Science 101 (Tiered Lecture)',
+      'Equipment Category': 'Laser Projector',
+      'Make / Model': 'Panasonic PT-MZ780 (7,000 lm)',
+      'Serial / Asset Tag': 'PAN-90218-MZ7',
+      'Install Date (YYYY-MM-DD)': '2021-08-15',
+      'Shelflife / Lifespan (Years)': 5,
+      'Replacement Cost ($)': 4800,
+      'Installation / Labor Cost ($)': 850,
+      'Physical Condition': 'Good',
+      'Maintenance Status': 'Operational',
+      'Active Issue / Ticket': 'None',
+      'Assigned Technician': 'Marcus Vance',
+      'Notes / Special Instructions': '180-seat flagship lecture hall',
+    },
+    {
+      'Asset ID': 'AV-ART-204',
+      'Building': 'Fine Arts Complex',
+      'Room / Space': 'Arts 204 (Studio)',
+      'Equipment Category': 'Interactive Touch Display',
+      'Make / Model': 'Samsung Flip Pro 85"',
+      'Serial / Asset Tag': 'SAM-88301-FLP',
+      'Install Date (YYYY-MM-DD)': '2020-09-01',
+      'Shelflife / Lifespan (Years)': 6,
+      'Replacement Cost ($)': 3900,
+      'Installation / Labor Cost ($)': 450,
+      'Physical Condition': 'Fair',
+      'Maintenance Status': 'Requires Service',
+      'Active Issue / Ticket': 'Digitizer drift on lower corner',
+      'Assigned Technician': 'Elena Rostova',
+      'Notes / Special Instructions': 'Used for digital drawing classes',
+    },
+    {
+      'Asset ID': 'AV-ENG-301',
+      'Building': 'Engineering Research Center',
+      'Room / Space': 'Engineering 301',
+      'Equipment Category': 'AV Matrix Switcher / Controller',
+      'Make / Model': 'Crestron DMPS3-4K-350-C',
+      'Serial / Asset Tag': 'CRS-77109-DMP',
+      'Install Date (YYYY-MM-DD)': '2019-04-10',
+      'Shelflife / Lifespan (Years)': 7,
+      'Replacement Cost ($)': 7800,
+      'Installation / Labor Cost ($)': 1600,
+      'Physical Condition': 'Poor',
+      'Maintenance Status': 'Scheduled Repair',
+      'Active Issue / Ticket': 'DM 8G+ port 3 sync drop',
+      'Assigned Technician': 'David Kim',
+      'Notes / Special Instructions': 'Overdue for replacement in upcoming fiscal year',
+    },
+  ];
+
+  const worksheet = XLSX.utils.json_to_sheet(headers);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'AV Inventory Template');
+
+  const filename = `College_AV_Inventory_Template.${format}`;
+  XLSX.writeFile(workbook, filename, { bookType: format });
+}
+
+/**
+ * Exports current active items to Excel or CSV
+ */
+export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 'xlsx') {
+  const exportRows = items.map((item) => ({
+    'Asset ID': item.id,
+    'Building': item.building,
+    'Room': item.room,
+    'Category': item.category,
+    'Make & Model': item.makeModel,
+    'Serial Number': item.serialNumber,
+    'Install Date': item.installDate,
+    'Age (Years)': item.ageYears,
+    'Shelflife (Years)': item.shelflifeYears,
+    'Remaining Life (Years)': item.remainingYears,
+    'Lifecycle Status': item.lifecycleStatus,
+    'Replacement Fiscal Year': item.replacementFiscalYear,
+    'Scheduled Quarter': item.scheduledQuarter || '',
+    'Replacement Hardware Cost ($)': item.replacementCost,
+    'Installation Labor Cost ($)': item.installationLaborCost,
+    'Total Replacement Cost ($)': item.totalReplacementCost,
+    'Physical Condition': item.condition,
+    'Maintenance Status': item.maintenanceStatus,
+    'Active Issue': item.activeIssue || 'None',
+    'Assigned Technician': item.assignedTech || '',
+    'Notes': item.notes || '',
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'AV Fleet Inventory');
+
+  const filename = `College_AV_Inventory_Export_${new Date().toISOString().split('T')[0]}.${format}`;
+  XLSX.writeFile(workbook, filename, { bookType: format });
+}

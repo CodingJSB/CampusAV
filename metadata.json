@@ -1,0 +1,8 @@
+{
+  "name": "CampusAV - College Classroom AV Lifecycle & Budget Planning Engine",
+  "description": "Transient, privacy-first classroom AV technology inventory, maintenance tracker, replacement cycle forecasting, and automated fiscal year budget planning dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
