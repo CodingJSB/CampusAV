@@ -248,8 +248,27 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
                     className="hover:bg-slate-50 cursor-pointer transition-colors group"
                   >
                     <td className="py-2.5 px-4 font-medium text-slate-900">
-                      <div>{item.room}</div>
-                      <div className="text-[11px] text-slate-400 font-normal">{item.building}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold">{item.room}</span>
+                        {item.roomName && (
+                          <span className="text-[11px] text-slate-600 font-normal">({item.roomName})</span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-normal flex items-center gap-1.5">
+                        <span>{item.building}</span>
+                        {item.spaceType && (
+                          <>
+                            <span>·</span>
+                            <span className="text-indigo-600 font-medium">{item.spaceType}</span>
+                          </>
+                        )}
+                        {item.vendor && (
+                          <>
+                            <span>·</span>
+                            <span>{item.vendor}</span>
+                          </>
+                        )}
+                      </div>
                     </td>
                     <td className="py-2.5 px-4 text-slate-800">
                       <div className="font-medium group-hover:text-sky-600 transition-colors">

@@ -387,9 +387,17 @@ export function groupItemsIntoClassroomPackages(items: AVItem[]): ClassroomPacka
       ? 'Winter Break Overhaul'
       : 'Mid-Year Upgrade Window';
 
+    const roomFriendlyName = roomItems[0]?.roomName;
+    const roomDisplayName = roomFriendlyName && roomFriendlyName !== 'Classroom' ? `${roomName} (${roomFriendlyName})` : roomName;
+    const spaceType = roomItems[0]?.spaceType || '';
+    const vendor = roomItems[0]?.vendor || 'AVC';
+
     packages.push({
       roomName,
+      roomDisplayName,
       building,
+      spaceType,
+      vendor,
       items: roomItems,
       itemCount: roomItems.length,
       totalHardwareCost,

@@ -170,9 +170,25 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
                 <div className="p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                   <div className="space-y-1.5 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-base font-bold text-slate-900">{pkg.roomName}</h3>
+                      <h3 className="text-base font-bold text-slate-900">{pkg.roomDisplayName || pkg.roomName}</h3>
                       <span className="text-slate-300">·</span>
                       <span className="text-xs text-slate-500">{pkg.building}</span>
+                      {pkg.spaceType && (
+                        <>
+                          <span className="text-slate-300">·</span>
+                          <span className="text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 font-medium">
+                            {pkg.spaceType}
+                          </span>
+                        </>
+                      )}
+                      {pkg.vendor && (
+                        <>
+                          <span className="text-slate-300">·</span>
+                          <span className="text-[11px] text-slate-500">
+                            Vendor: <strong className="text-slate-700">{pkg.vendor}</strong>
+                          </span>
+                        </>
+                      )}
                       <span className="text-slate-300">·</span>
                       <span className="text-xs font-semibold text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200 font-mono">
                         Target: {pkg.projectedFiscalYear} ({pkg.targetSeason})

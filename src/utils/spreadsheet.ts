@@ -49,7 +49,13 @@ function normalizeMaintenanceStatus(raw: string): MaintenanceStatus {
 }
 
 function normalizeDate(raw: any): string {
-  if (!raw) return '2022-01-01';
+  if (!raw) return '2022-07-01';
+  const str = String(raw).trim();
+  // If 4-digit year like 2025 or 2016
+  if (/^(19|20)\d{2}$/.test(str)) {
+    return `${str}-07-01`;
+  }
+
   // If Excel serial number date
   if (typeof raw === 'number') {
     const parsed = XLSX.SSF.parse_date_code(raw);
@@ -69,33 +75,51 @@ function normalizeDate(raw: any): string {
     return `${y}-${m}-${day}`;
   }
 
-  return '2022-01-01';
+  return '2022-07-01';
+}
+
+export function getDefaultCostForCategory(category: string, model: string): number {
+  const s = `${category} ${model}`.toLowerCase();
+  if (s.includes('dmps') || s.includes('matrix') || s.includes('nvx')) return 6800;
+  if (s.includes('switcher')) return 4500;
+  if (s.includes('short-throw') || s.includes('short throw')) return 2800;
+  if (s.includes('projector') || s.includes('phz') || s.includes('l630') || s.includes('epson') || s.includes('sony')) return 3500;
+  if (s.includes('screen') || s.includes('da-lite') || s.includes('draper')) return 1250;
+  if (s.includes('flat') || s.includes('panel') || s.includes('samsung')) return 1800;
+  if (s.includes('wireless') || s.includes('airmedia') || s.includes('clickshare') || s.includes('solstice')) return 1400;
+  if (s.includes('document') || s.includes('wolfvision') || s.includes('doc cam') || s.includes('elpdc')) return 1100;
+  if (s.includes('controller') || s.includes('mlc') || s.includes('tsw')) return 1400;
+  if (s.includes('mic') || s.includes('tesira') || s.includes('shure') || s.includes('vaddio')) return 2400;
+  if (s.includes('camera') || s.includes('vaddio') || s.includes('huddlecam') || s.includes('ptz')) return 1800;
+  if (s.includes('tv bar') || s.includes('video bar')) return 2400;
+  if (s.includes('bluray') || s.includes('dvd') || s.includes('vcr')) return 350;
+  return 1500;
 }
 
 function getDefaultLifespan(category: EquipmentCategory): number {
-  switch (category) {
-    case 'Laser Projector': return 5;
-    case 'Lamp Projector': return 4;
-    case 'Interactive Touch Display': return 6;
-    case 'Commercial Flat Panel': return 6;
-    case 'AV Matrix Switcher / Controller': return 7;
-    case 'Audio DSP & Mic Array': return 8;
-    case 'Wireless Presentation Gateway': return 4;
-    case 'HyFlex PTZ Camera': return 5;
-    case 'Control Touchpanel': return 6;
-    case 'Assistive Listening System': return 8;
-    case 'Lectern PC & Doc Cam': return 4;
-    default: return 5;
-  }
+  const s = String(category).toLowerCase();
+  if (s.includes('screen')) return 10;
+  if (s.includes('controller')) return 7;
+  if (s.includes('switcher')) return 7;
+  if (s.includes('projector')) return 6;
+  if (s.includes('flat') || s.includes('panel')) return 7;
+  if (s.includes('wireless')) return 5;
+  if (s.includes('mic') || s.includes('audio')) return 8;
+  if (s.includes('camera')) return 6;
+  if (s.includes('document')) return 7;
+  return 7;
 }
 
 export interface ColumnMapping {
   room: string;
+  roomName: string;
   building: string;
+  spaceType: string;
   category: string;
   makeModel: string;
   serialNumber: string;
   installDate: string;
+  installYear: string;
   shelflifeYears: string;
   replacementCost: string;
   installationLaborCost: string;
@@ -103,6 +127,7 @@ export interface ColumnMapping {
   maintenanceStatus: string;
   activeIssue: string;
   assignedTech: string;
+  vendor: string;
   notes: string;
 }
 
@@ -133,18 +158,22 @@ export function detectSuggestedMapping(headers: string[]): ColumnMapping {
 
   return {
     room: findMatch('room', 'classroom', 'roomnumber', 'space', 'location', 'rm'),
+    roomName: findMatch('roomname', 'name', 'spacename', 'lab'),
     building: findMatch('building', 'facility', 'complex', 'hall', 'campus', 'dept'),
-    category: findMatch('category', 'type', 'equipmenttype', 'devicetype', 'class'),
+    spaceType: findMatch('typeofspace', 'spacetype', 'roomtype', 'space', 'usage'),
+    category: findMatch('equipmentcategory', 'category', 'type', 'equipmenttype', 'devicetype', 'class'),
     makeModel: findMatch('makemodel', 'model', 'equipment', 'item', 'device', 'name', 'description', 'hardware'),
     serialNumber: findMatch('serialnumber', 'serial', 'sn', 'assettag', 'tag', 'barcode', 'id'),
-    installDate: findMatch('installdate', 'purchased', 'dateinstalled', 'purchasedate', 'acquisitiondate', 'date', 'year'),
+    installDate: findMatch('installdate', 'dateinstalled', 'purchasedate', 'acquisitiondate', 'installyear', 'date'),
+    installYear: findMatch('installyear', 'year', 'purchaseyear'),
     shelflifeYears: findMatch('shelflifeyears', 'shelflife', 'lifespan', 'shelflifeyrs', 'expectedlife', 'cycle', 'useful life'),
     replacementCost: findMatch('replacementcost', 'hardwarecost', 'cost', 'unitcost', 'price', 'estimate', 'budget'),
     installationLaborCost: findMatch('installationlaborcost', 'laborcost', 'installationcost', 'labor', 'services'),
     condition: findMatch('condition', 'state', 'health', 'quality'),
-    maintenanceStatus: findMatch('maintenancestatus', 'status', 'repair', 'ticket', 'operationalstatus'),
+    maintenanceStatus: findMatch('status', 'maintenancestatus', 'repair', 'ticket', 'operationalstatus'),
     activeIssue: findMatch('activeissue', 'issue', 'problem', 'ticketnotes', 'defect', 'comments'),
     assignedTech: findMatch('assignedtech', 'tech', 'technician', 'lead', 'owner'),
+    vendor: findMatch('vendor', 'integrator', 'contractor', 'partner'),
     notes: findMatch('notes', 'remarks', 'memo'),
   };
 }
@@ -183,17 +212,22 @@ export function processRowsWithMapping(rawData: Record<string, any>[], mapping: 
     const getVal = (col: string) => (col && row[col] !== undefined ? row[col] : '');
 
     const room = getVal(mapping.room) || `Classroom ${index + 101}`;
+    const roomName = getVal(mapping.roomName) || '';
     const building = getVal(mapping.building) || 'Main Campus';
+    const spaceType = getVal(mapping.spaceType) || '';
     const makeModel = getVal(mapping.makeModel) || 'Standard AV Device';
     const category = normalizeCategory(getVal(mapping.category) || makeModel);
-    const serialNumber = getVal(mapping.serialNumber) || `TAG-${1000 + index}`;
-    const installDate = normalizeDate(getVal(mapping.installDate));
+    const serialNumber = getVal(mapping.serialNumber) || 'NA';
+    const rawDate = getVal(mapping.installDate) || getVal(mapping.installYear);
+    const installDate = normalizeDate(rawDate);
+    const installYear = getVal(mapping.installYear) || (installDate ? installDate.slice(0, 4) : 2025);
 
     const rawLifespan = getVal(mapping.shelflifeYears);
     const shelflifeYears = Number(rawLifespan) > 0 ? Number(rawLifespan) : getDefaultLifespan(category);
 
+    // If replacement cost is empty or zero, apply category standard baseline estimate
     const rawCost = getVal(mapping.replacementCost);
-    const replacementCost = Number(rawCost) > 0 ? Number(rawCost) : 3200;
+    const replacementCost = Number(rawCost) > 0 ? Number(rawCost) : getDefaultCostForCategory(category, makeModel);
 
     const rawLabor = getVal(mapping.installationLaborCost);
     const installationLaborCost = Number(rawLabor) >= 0 && rawLabor !== '' ? Number(rawLabor) : Math.round(replacementCost * 0.15);
@@ -201,22 +235,27 @@ export function processRowsWithMapping(rawData: Record<string, any>[], mapping: 
     const condition = normalizeCondition(getVal(mapping.condition));
     const maintenanceStatus = normalizeMaintenanceStatus(getVal(mapping.maintenanceStatus));
     const activeIssue = getVal(mapping.activeIssue) || 'None';
-    const assignedTech = getVal(mapping.assignedTech) || 'AV Campus Team';
+    const assignedTech = getVal(mapping.assignedTech) || 'AVC AV Support';
+    const vendor = getVal(mapping.vendor) || 'AVC';
     const notes = getVal(mapping.notes) || '';
 
-    const id = `AV-${String(building).slice(0, 3).toUpperCase()}-${index + 101}`;
+    const id = `AV-${String(building).slice(0, 3).toUpperCase()}-${String(room).replace(/[^a-zA-Z0-9]/g, '')}-${index + 1}`;
 
     return enrichAVItem({
       id,
       room: String(room).trim(),
+      roomName: String(roomName).trim(),
       building: String(building).trim(),
+      spaceType: String(spaceType).trim(),
       category,
       makeModel: String(makeModel).trim(),
       serialNumber: String(serialNumber).trim(),
       installDate,
+      installYear,
       shelflifeYears,
       replacementCost,
       installationLaborCost,
+      vendor: String(vendor).trim(),
       condition,
       maintenanceStatus,
       activeIssue: String(activeIssue).trim(),

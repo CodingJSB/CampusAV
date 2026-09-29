@@ -1,4 +1,16 @@
 export type EquipmentCategory =
+  | 'Projector'
+  | 'Projector (Short-throw)'
+  | 'Screen'
+  | 'Controller'
+  | 'Switcher'
+  | 'Flat-Panel'
+  | 'Wireless Presentation'
+  | 'Document Camera'
+  | 'Camera'
+  | 'Ceiling Mic'
+  | 'TV Bar with Camera'
+  | 'BluRay/DVD/VCR'
   | 'Laser Projector'
   | 'Lamp Projector'
   | 'Interactive Touch Display'
@@ -9,7 +21,8 @@ export type EquipmentCategory =
   | 'HyFlex PTZ Camera'
   | 'Control Touchpanel'
   | 'Assistive Listening System'
-  | 'Lectern PC & Doc Cam';
+  | 'Lectern PC & Doc Cam'
+  | string;
 
 export type MaintenanceStatus =
   | 'Operational'
@@ -31,16 +44,20 @@ export type LifecycleStatus =
   | 'Past Lifespan / Overdue';
 
 export interface AVItem {
-  id: string; // e.g. "AV-SCI-101"
-  room: string; // e.g. "Science Hall 101"
-  building: string; // e.g. "Science Hall"
+  id: string; // e.g. "AV-NH-105-1"
+  room: string; // e.g. "NH-105"
+  roomName?: string; // e.g. "Ecology Lab"
+  building: string; // e.g. "Nobel Hall"
+  spaceType?: string; // e.g. "Lab (TL)", "Active Classroom"
   category: EquipmentCategory;
-  makeModel: string; // e.g. "Panasonic PT-MZ780 (7,000 Lumens)"
+  makeModel: string; // e.g. "Epson EB-L630U"
   serialNumber: string;
   installDate: string; // YYYY-MM-DD
-  shelflifeYears: number; // e.g. 5
+  installYear?: number | string; // e.g. 2025
+  shelflifeYears: number; // e.g. 7
   replacementCost: number; // USD
   installationLaborCost: number; // USD
+  vendor?: string; // e.g. "AVC"
   condition: EquipmentCondition;
   maintenanceStatus: MaintenanceStatus;
   activeIssue?: string;
@@ -61,16 +78,19 @@ export interface AVItem {
 }
 
 export interface ClassroomPackage {
-  roomName: string; // e.g. "Science 101 (Tiered Lecture)"
+  roomName: string; // e.g. "NH-105"
+  roomDisplayName: string; // e.g. "NH-105 (Ecology Lab)"
   building: string;
-  roomTier?: string; // e.g. "Tier 2 HyFlex Lecture", "Seminar Room", "Main Auditorium"
+  spaceType?: string; // e.g. "Lab (TL)", "Active Classroom"
+  roomTier?: string;
+  vendor?: string; // e.g. "AVC"
   items: AVItem[];
   itemCount: number;
   totalHardwareCost: number;
   totalLaborCost: number;
   totalPackageCost: number;
   lastOverhaulDate: string; // Last full room upgrade date
-  shelflifeYears: number; // Room overhaul cycle (e.g. 6 yrs)
+  shelflifeYears: number; // Room overhaul cycle (e.g. 7 yrs)
   projectedFiscalYear: string; // FY when whole room is refreshed
   scheduledQuarter: string; // e.g. "2026-Q4", "Summer 2027"
   targetSeason: string; // e.g. "Summer Overhaul", "Winter Break", "Mid-Year"
@@ -78,7 +98,7 @@ export interface ClassroomPackage {
   hasCriticalFailure: boolean;
   activeIssues: string[];
   prematureSwaps: AVItem[]; // Items failing ahead of master room overhaul
-  primaryEquipmentSummary: string; // e.g. "Laser Projector + Crestron NVX + Shure Array"
+  primaryEquipmentSummary: string; // e.g. "Epson EB-L630U + Extron MLC 55 + Da-Lite"
 }
 
 export type PlanningMode = 'bundled_rooms' | 'component_assets';

@@ -86,6 +86,29 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Room Name & Space Type */}
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Room Name / Label</label>
+              <input
+                type="text"
+                value={formData.roomName || ''}
+                onChange={(e) => handleChange('roomName', e.target.value)}
+                placeholder="e.g. Ecology Lab, Seminar..."
+                className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 text-slate-900 focus:bg-white focus:ring-2 focus:ring-sky-500"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Type of Space</label>
+              <input
+                type="text"
+                value={formData.spaceType || ''}
+                onChange={(e) => handleChange('spaceType', e.target.value)}
+                placeholder="e.g. Lab (TL), Active Classroom..."
+                className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 text-slate-900 focus:bg-white focus:ring-2 focus:ring-sky-500"
+              />
+            </div>
+
             {/* Make / Model */}
             <div className="sm:col-span-2">
               <label className="block font-semibold text-slate-700 mb-1">Make & Model</label>
@@ -111,23 +134,38 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
             {/* Category */}
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Category</label>
-              <select
+              <input
+                type="text"
                 value={formData.category}
-                onChange={(e) => handleChange('category', e.target.value as EquipmentCategory)}
+                onChange={(e) => handleChange('category', e.target.value)}
+                list="category-suggestions"
                 className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 text-slate-900 focus:bg-white focus:ring-2 focus:ring-sky-500"
-              >
-                <option value="Laser Projector">Laser Projector</option>
-                <option value="Lamp Projector">Lamp Projector</option>
-                <option value="Interactive Touch Display">Interactive Touch Display</option>
-                <option value="Commercial Flat Panel">Commercial Flat Panel</option>
-                <option value="AV Matrix Switcher / Controller">AV Matrix Switcher / Controller</option>
-                <option value="Audio DSP & Mic Array">Audio DSP & Mic Array</option>
-                <option value="Wireless Presentation Gateway">Wireless Presentation Gateway</option>
-                <option value="HyFlex PTZ Camera">HyFlex PTZ Camera</option>
-                <option value="Control Touchpanel">Control Touchpanel</option>
-                <option value="Assistive Listening System">Assistive Listening System</option>
-                <option value="Lectern PC & Doc Cam">Lectern PC & Doc Cam</option>
-              </select>
+              />
+              <datalist id="category-suggestions">
+                <option value="Projector" />
+                <option value="Projector (Short-throw)" />
+                <option value="Screen" />
+                <option value="Controller" />
+                <option value="Switcher" />
+                <option value="Flat-Panel" />
+                <option value="Wireless Presentation" />
+                <option value="Document Camera" />
+                <option value="Camera" />
+                <option value="Ceiling Mic" />
+                <option value="TV Bar with Camera" />
+                <option value="BluRay/DVD/VCR" />
+              </datalist>
+            </div>
+
+            {/* Vendor */}
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Integrator / Vendor</label>
+              <input
+                type="text"
+                value={formData.vendor || ''}
+                onChange={(e) => handleChange('vendor', e.target.value)}
+                className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 text-slate-900 focus:bg-white focus:ring-2 focus:ring-sky-500"
+              />
             </div>
 
             {/* Install Date */}
