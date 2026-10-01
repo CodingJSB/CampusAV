@@ -75,7 +75,15 @@ export interface AVItem {
   totalReplacementCost: number; // replacementCost + installationLaborCost
   isPrematureSwap?: boolean; // Flagged for early component replacement before room overhaul
   roomPackageId?: string; // Grouping identifier for the classroom
+
+  // Whole-room renovation & inflation fields
+  roomLastRenovationYear?: number;
+  roomBaselineCost?: number;
+  roomProjectedOverhaulCost?: number;
+  roomReadinessScore?: number;
 }
+
+export type BudgetPlanningMode = 'whole_room' | 'individual_components';
 
 export interface ClassroomPackage {
   roomName: string; // e.g. "NH-105"
@@ -88,7 +96,23 @@ export interface ClassroomPackage {
   itemCount: number;
   totalHardwareCost: number;
   totalLaborCost: number;
-  totalPackageCost: number;
+  totalPackageCost: number; // Raw sum of line items
+
+  // Historical Renovation & Inflation Forecasting
+  lastRenovationYear: number; // Year room was last fully renovated (e.g. 2021)
+  lastRenovationCost: number; // Baseline project cost when renovated (e.g. $55,000)
+  isDefaultBaselineCost: boolean; // True if standard room benchmark was used as fallback
+  projectedOverhaulCost: number; // Inflation-adjusted projected cost for the whole-room overhaul
+  inflationRate: number; // Compounding inflation rate (e.g. 0.05 for 5%/year)
+  inflationDeltaCost: number; // Additional budget needed due to inflation compounding
+
+  // Room Equipment Agedness & Readiness Composite Index (0-100)
+  readinessScore: number; // 0-100 composite index
+  readinessRating: 'Optimal' | 'Good' | 'Fair' | 'Critical / Due';
+  averageComponentAgeYears: number;
+  newestComponentAgeYears: number; // Captures recent partial swap (e.g., new projector)
+  oldestComponentAgeYears: number; // Captures oldest anchor component
+
   lastOverhaulDate: string; // Last full room upgrade date
   shelflifeYears: number; // Room overhaul cycle (e.g. 7 yrs)
   projectedFiscalYear: string; // FY when whole room is refreshed
@@ -111,6 +135,13 @@ export interface FiscalYearBudget {
   itemCount: number;
   categories: Record<string, number>;
   items: AVItem[];
+
+  // Whole-room inflation-adjusted budgeting fields
+  planningMode?: BudgetPlanningMode;
+  wholeRoomCost?: number; // Total inflation-adjusted whole room overhaul project budget
+  wholeRoomCount?: number; // Number of classrooms scheduled for overhaul in this FY
+  inflationDelta?: number; // Additional cost attributed to compounding inflation
+  roomPackages?: ClassroomPackage[]; // Classroom packages scheduled for overhaul in this FY
 }
 
 export interface QuarterExpense {

@@ -1,13 +1,14 @@
 import React from 'react';
-import { InventoryStats } from '../types/inventory';
-import { AlertTriangle, CalendarClock, DollarSign, Layers, Wrench, ShieldAlert } from 'lucide-react';
+import { InventoryStats, BudgetPlanningMode } from '../types/inventory';
+import { AlertTriangle, CalendarClock, DollarSign, Layers, Wrench, ShieldAlert, Boxes } from 'lucide-react';
 
 interface MetricsCardsProps {
   stats: InventoryStats;
   onFilterClick?: (filterType: string) => void;
+  planningMode?: BudgetPlanningMode;
 }
 
-export const MetricsCards: React.FC<MetricsCardsProps> = ({ stats, onFilterClick }) => {
+export const MetricsCards: React.FC<MetricsCardsProps> = ({ stats, onFilterClick, planningMode = 'whole_room' }) => {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
       {/* 1. Fleet Size & Value */}
@@ -37,7 +38,7 @@ export const MetricsCards: React.FC<MetricsCardsProps> = ({ stats, onFilterClick
           ${stats.nextFiscalYearBudget.toLocaleString()}
         </div>
         <div className="mt-2 text-xs text-slate-500 flex items-center gap-1.5">
-          <span>Based on predetermined shelf life</span>
+          <span>{planningMode === 'whole_room' ? 'Turnkey overhaul (5% inf.)' : 'Component line-items'}</span>
         </div>
       </div>
 

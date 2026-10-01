@@ -1,17 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FiscalYearBudget } from '../types/inventory';
-import { BarChart3, Info, ChevronLeft, ChevronRight } from 'lucide-react';
+import { FiscalYearBudget, BudgetPlanningMode } from '../types/inventory';
+import { BarChart3, Info, ChevronLeft, ChevronRight, Layers, Boxes } from 'lucide-react';
 
 interface FiscalBudgetChartProps {
   budgets: FiscalYearBudget[];
   selectedFY?: string | null;
   onSelectFY?: (fy: string | null) => void;
+  planningMode?: BudgetPlanningMode;
+  onTogglePlanningMode?: (mode: BudgetPlanningMode) => void;
+  inflationRate?: number;
 }
 
 export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
   budgets,
   selectedFY,
   onSelectFY,
+  planningMode = 'whole_room',
+  onTogglePlanningMode,
+  inflationRate = 0.05,
 }) => {
   const [viewMode, setViewMode] = useState<'total' | 'split'>('split');
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -52,30 +58,74 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
   const maxBudget = Math.max(...budgets.map((b) => b.totalCost), 10000);
   const chartHeight = 220;
   const isMultiYear = budgets.length > 6;
+  const isWholeRoom = planningMode === 'whole_room';
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-5">
       {/* Chart Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <BarChart3 className="w-4 h-4 text-sky-600" />
             <h3 className="text-sm font-bold text-slate-900">
               Fiscal Year Replacement Budget Forecast (CapEx)
             </h3>
+            {isWholeRoom ? (
+              <span className="bg-emerald-50 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                <Boxes className="w-3 h-3 text-emerald-600" />
+                Whole-Room Overhaul ({(inflationRate * 100).toFixed(0)}% Inflation)
+              </span>
+            ) : (
+              <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1">
+                <Layers className="w-3 h-3 text-slate-500" />
+                Component Line-Items
+              </span>
+            )}
             {isMultiYear && (
               <span className="bg-sky-50 text-sky-700 text-[10px] font-bold px-2 py-0.5 rounded border border-sky-200">
                 {budgets.length}-Year Forecast ({budgets[0]?.fiscalYear} – {budgets[budgets.length - 1]?.fiscalYear})
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Automated replacement projections. Click any FY bar to bring out classroom packages & devices scheduled for that year.
+          <p className="text-xs text-slate-500 mt-1">
+            {isWholeRoom
+              ? `Integrated whole-room renovation projects compounded at ${(inflationRate * 100).toFixed(0)}% annual inflation. Click any bar to bring out classroom packages & devices.`
+              : 'Line-item equipment replacements + 15% labor based on individual shelf lives. Click any bar to inspect.'}
           </p>
         </div>
 
         {/* View Mode & Horizontal Navigation Controls */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Budget Planning Mode Selector */}
+          {onTogglePlanningMode && (
+            <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded text-xs border border-slate-200">
+              <button
+                type="button"
+                onClick={() => onTogglePlanningMode('whole_room')}
+                className={`px-2.5 py-1 rounded transition-colors font-medium flex items-center gap-1 ${
+                  isWholeRoom
+                    ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Forecast based on whole-room renovations with compounding 5% inflation"
+              >
+                <span>Whole Room (5% Inf.)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onTogglePlanningMode('individual_components')}
+                className={`px-2.5 py-1 rounded transition-colors font-medium flex items-center gap-1 ${
+                  !isWholeRoom
+                    ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Forecast based on individual component line-item lifespans"
+              >
+                <span>Component Swaps</span>
+              </button>
+            </div>
+          )}
+
           {/* Scroll Arrows when multiple years exist */}
           {isMultiYear && (
             <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded">
@@ -118,7 +168,7 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
                 viewMode === 'split' ? 'bg-white text-slate-900 font-semibold shadow-xs' : 'text-slate-600'
               }`}
             >
-              Hardware / Labor
+              {isWholeRoom ? 'Base / Inflation' : 'Hardware / Labor'}
             </button>
             <button
               onClick={() => setViewMode('total')}
@@ -146,12 +196,13 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
         <div className="text-[11px] text-slate-500">
           {hoveredIndex !== null ? (
             <span className="font-semibold text-slate-800">
-              {budgets[hoveredIndex]?.fiscalYear}: ${budgets[hoveredIndex]?.totalCost.toLocaleString()} ({budgets[hoveredIndex]?.itemCount} items) · Hardware: ${budgets[hoveredIndex]?.hardwareCost.toLocaleString()} · Labor: ${budgets[hoveredIndex]?.laborCost.toLocaleString()}
+              {budgets[hoveredIndex]?.fiscalYear}: ${budgets[hoveredIndex]?.totalCost.toLocaleString()}
+              {isWholeRoom && budgets[hoveredIndex]?.wholeRoomCount
+                ? ` (${budgets[hoveredIndex]?.wholeRoomCount} rooms · Base: $${Math.max(0, budgets[hoveredIndex]!.totalCost - (budgets[hoveredIndex]?.inflationDelta || 0)).toLocaleString()} + Inflation: $${(budgets[hoveredIndex]?.inflationDelta || 0).toLocaleString()})`
+                : ` (${budgets[hoveredIndex]?.itemCount} items · Hardware: $${budgets[hoveredIndex]?.hardwareCost.toLocaleString()} · Labor: $${budgets[hoveredIndex]?.laborCost.toLocaleString()})`}
             </span>
-          ) : isMultiYear ? (
-            <span className="text-slate-400">
-              Tip: Scroll horizontally or use arrows to view all forecast years
-            </span>
+          ) : isWholeRoom ? (
+            <span>Whole-Room Mode: Bars reflect full classroom overhaul projects with {(inflationRate * 100).toFixed(0)}% annual inflation</span>
           ) : (
             <span>Click any fiscal year bar to filter fleet inventory below</span>
           )}
@@ -159,20 +210,33 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
 
         <div className="flex items-center gap-4">
           {viewMode === 'split' ? (
-            <>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-xs bg-sky-600" />
-                <span>Hardware Replacement</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-xs bg-sky-300" />
-                <span>Installation & Labor (Est. 15%)</span>
-              </div>
-            </>
+            isWholeRoom ? (
+              <>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-xs bg-sky-700" />
+                  <span>Base Overhaul Benchmark</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-xs bg-teal-400" />
+                  <span>{(inflationRate * 100).toFixed(0)}% Annual Inflation</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-xs bg-sky-600" />
+                  <span>Hardware Replacement</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-xs bg-sky-300" />
+                  <span>Installation & Labor (Est. 15%)</span>
+                </div>
+              </>
+            )
           ) : (
             <div className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded-xs bg-sky-600" />
-              <span>Total Replacement CapEx</span>
+              <span>Total Projected CapEx</span>
             </div>
           )}
         </div>
@@ -204,8 +268,17 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
               const isSelected = selectedFY === b.fiscalYear;
               const isHovered = hoveredIndex === idx;
               const totalPercent = Math.min(100, Math.round((b.totalCost / maxBudget) * 100));
-              const hardwarePercent = b.totalCost > 0 ? (b.hardwareCost / b.totalCost) * 100 : 0;
-              const laborPercent = b.totalCost > 0 ? (b.laborCost / b.totalCost) * 100 : 0;
+
+              // Split percentages
+              const inflationPercent = isWholeRoom && b.totalCost > 0
+                ? Math.round(((b.inflationDelta || 0) / b.totalCost) * 100)
+                : 0;
+              const baseRoomPercent = isWholeRoom && b.totalCost > 0
+                ? 100 - inflationPercent
+                : 0;
+
+              const hardwarePercent = !isWholeRoom && b.totalCost > 0 ? (b.hardwareCost / b.totalCost) * 100 : 0;
+              const laborPercent = !isWholeRoom && b.totalCost > 0 ? (b.laborCost / b.totalCost) * 100 : 0;
 
               return (
                 <button
@@ -238,16 +311,31 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
                     style={{ height: `${Math.max(8, (totalPercent / 100) * (chartHeight - 45))}px` }}
                   >
                     {viewMode === 'split' ? (
-                      <div className="h-full flex flex-col justify-end">
-                        <div
-                          className="bg-sky-300 w-full transition-all group-hover:bg-sky-200"
-                          style={{ height: `${laborPercent}%` }}
-                        />
-                        <div
-                          className="bg-sky-600 w-full transition-all group-hover:bg-sky-500"
-                          style={{ height: `${hardwarePercent}%` }}
-                        />
-                      </div>
+                      isWholeRoom ? (
+                        <div className="h-full flex flex-col justify-end">
+                          <div
+                            className="bg-teal-400 w-full transition-all group-hover:bg-teal-300"
+                            style={{ height: `${inflationPercent}%` }}
+                            title={`Inflation allowance: +$${(b.inflationDelta || 0).toLocaleString()}`}
+                          />
+                          <div
+                            className="bg-sky-700 w-full transition-all group-hover:bg-sky-600"
+                            style={{ height: `${baseRoomPercent}%` }}
+                            title={`Base project benchmark: $${Math.max(0, b.totalCost - (b.inflationDelta || 0)).toLocaleString()}`}
+                          />
+                        </div>
+                      ) : (
+                        <div className="h-full flex flex-col justify-end">
+                          <div
+                            className="bg-sky-300 w-full transition-all group-hover:bg-sky-200"
+                            style={{ height: `${laborPercent}%` }}
+                          />
+                          <div
+                            className="bg-sky-600 w-full transition-all group-hover:bg-sky-500"
+                            style={{ height: `${hardwarePercent}%` }}
+                          />
+                        </div>
+                      )
                     ) : (
                       <div className="h-full bg-sky-600 group-hover:bg-sky-500 transition-colors" />
                     )}
@@ -265,7 +353,9 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
                       <span>{b.fiscalYear}</span>
                     </div>
                     <div className="text-[10px] text-slate-400 font-mono tabular-nums">
-                      {b.itemCount} {b.itemCount === 1 ? 'unit' : 'units'}
+                      {isWholeRoom && b.wholeRoomCount !== undefined
+                        ? `${b.wholeRoomCount} ${b.wholeRoomCount === 1 ? 'room' : 'rooms'}`
+                        : `${b.itemCount} ${b.itemCount === 1 ? 'unit' : 'units'}`}
                     </div>
                     <div className="text-[9px] font-semibold text-sky-600 opacity-80 group-hover:opacity-100 group-hover:underline mt-0.5">
                       {isSelected ? 'Active Filter ✓' : 'Inspect FY →'}
@@ -274,25 +364,62 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
 
                   {/* Hover Tooltip Card */}
                   {isHovered && (
-                    <div className="absolute bottom-full mb-3 z-30 w-52 bg-slate-900 text-white rounded-md p-3 text-xs shadow-xl pointer-events-none -left-6 sm:left-1/2 sm:-translate-x-1/2">
-                      <div className="font-bold border-b border-slate-700 pb-1 mb-1.5 flex justify-between">
-                        <span>{b.fiscalYear} CapEx Budget</span>
-                        <span className="text-sky-400">{b.itemCount} units</span>
+                    <div className="absolute bottom-full mb-3 z-30 w-64 bg-slate-900 text-white rounded-md p-3 text-xs shadow-xl pointer-events-none -left-6 sm:left-1/2 sm:-translate-x-1/2 text-left">
+                      <div className="font-bold border-b border-slate-700 pb-1 mb-1.5 flex justify-between items-center">
+                        <span>{b.fiscalYear} Capital Budget</span>
+                        <span className="text-sky-400 text-[11px]">
+                          {isWholeRoom ? `${b.wholeRoomCount || 0} Rooms Overhaul` : `${b.itemCount} Units`}
+                        </span>
                       </div>
-                      <div className="space-y-1 font-mono tabular-nums">
-                        <div className="flex justify-between text-slate-300">
-                          <span>Hardware:</span>
-                          <span>${b.hardwareCost.toLocaleString()}</span>
+
+                      {isWholeRoom ? (
+                        <div className="space-y-1 font-mono tabular-nums">
+                          <div className="flex justify-between text-slate-300">
+                            <span>Base Overhauls:</span>
+                            <span>${Math.max(0, b.totalCost - (b.inflationDelta || 0)).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between text-teal-400">
+                            <span>+5% Inflation Delta:</span>
+                            <span>+${(b.inflationDelta || 0).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between font-bold text-white pt-1 border-t border-slate-700">
+                            <span>Total Projected CapEx:</span>
+                            <span>${b.totalCost.toLocaleString()}</span>
+                          </div>
+
+                          {/* List of rooms due in this FY */}
+                          {b.roomPackages && b.roomPackages.length > 0 && (
+                            <div className="pt-2 mt-1 border-t border-slate-800 text-[10px] font-sans space-y-0.5">
+                              <span className="text-slate-400 font-semibold uppercase">Scheduled Rooms:</span>
+                              {b.roomPackages.slice(0, 3).map((pkg) => (
+                                <div key={pkg.roomName} className="flex justify-between text-slate-300">
+                                  <span className="truncate max-w-[130px]">{pkg.roomDisplayName}</span>
+                                  <span className="font-mono text-emerald-400">{pkg.readinessScore}% score</span>
+                                </div>
+                              ))}
+                              {b.roomPackages.length > 3 && (
+                                <div className="text-slate-500 italic">+{b.roomPackages.length - 3} more rooms</div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        <div className="flex justify-between text-slate-300">
-                          <span>Install / Labor:</span>
-                          <span>${b.laborCost.toLocaleString()}</span>
+                      ) : (
+                        <div className="space-y-1 font-mono tabular-nums">
+                          <div className="flex justify-between text-slate-300">
+                            <span>Hardware:</span>
+                            <span>${b.hardwareCost.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-300">
+                            <span>Install / Labor:</span>
+                            <span>${b.laborCost.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between font-bold text-white pt-1 border-t border-slate-700">
+                            <span>Total Projected:</span>
+                            <span>${b.totalCost.toLocaleString()}</span>
+                          </div>
                         </div>
-                        <div className="flex justify-between font-bold text-white pt-1 border-t border-slate-700">
-                          <span>Total Projected:</span>
-                          <span>${b.totalCost.toLocaleString()}</span>
-                        </div>
-                      </div>
+                      )}
+
                       <div className="mt-2 text-[10px] text-sky-300 font-sans font-medium">
                         Click to bring out {b.fiscalYear} packages & devices &darr;
                       </div>
@@ -310,11 +437,13 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
         <div className="flex items-center gap-1.5">
           <Info className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           <span>
-            {budgets[0]?.fiscalYear} incorporates urgent overdue units ({budgets[0]?.itemCount} items scheduled).
+            {isWholeRoom
+              ? `Budget compounds at ${(inflationRate * 100).toFixed(0)}% annual inflation from each classroom's last renovation baseline.`
+              : `${budgets[0]?.fiscalYear} incorporates urgent overdue units (${budgets[0]?.itemCount} items scheduled).`}
           </span>
         </div>
         <span className="text-[11px] font-mono font-medium text-slate-700">
-          Total {budgets.length}-Year CapEx: ${budgets.reduce((sum, b) => sum + b.totalCost, 0).toLocaleString()}
+          Total {budgets.length}-Year {isWholeRoom ? 'Turnkey' : 'Component'} CapEx: ${budgets.reduce((sum, b) => sum + b.totalCost, 0).toLocaleString()}
         </span>
       </div>
     </div>

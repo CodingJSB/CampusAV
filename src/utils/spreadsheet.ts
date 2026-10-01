@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
-import { AVItem, EquipmentCategory, EquipmentCondition, MaintenanceStatus } from '../types/inventory';
-import { enrichAVItem } from './calculations';
+import { AVItem, ClassroomPackage, EquipmentCategory, EquipmentCondition, MaintenanceStatus } from '../types/inventory';
+import { enrichAVItem, groupItemsIntoClassroomPackages } from './calculations';
 
 /**
  * Normalizes string keys for flexible header matching
@@ -288,6 +288,8 @@ export interface ColumnMapping {
   assignedTech: string;
   vendor: string;
   notes: string;
+  lastRenovationYear: string;
+  renovationCost: string;
 }
 
 export interface SpreadsheetInspection {
@@ -338,8 +340,8 @@ export function detectSuggestedMapping(headers: string[]): ColumnMapping {
     category: findMatch('category', 'equipmentcategory', 'equipcategory', 'equipmenttype', 'equiptype', 'itemtype', 'devicetype', 'hardwarecategory', 'classification', 'type', 'class', 'group'),
     makeModel: findMatch('makemodel', 'model', 'equipment', 'item', 'device', 'name', 'description', 'hardware'),
     serialNumber: findMatch('serialnumber', 'serial', 'sn', 'assettag', 'tag', 'barcode', 'id'),
-    installDate: findMatch('installdate', 'dateinstalled', 'purchasedate', 'acquisitiondate', 'installyear', 'date'),
-    installYear: findMatch('installyear', 'year', 'purchaseyear'),
+    installDate: findMatch('installyear', 'installationyear', 'yearinstalled', 'installdate', 'dateinstalled', 'purchasedate', 'acquisitiondate', 'date', 'year'),
+    installYear: findMatch('installyear', 'installationyear', 'yearinstalled', 'year', 'purchaseyear'),
     shelflifeYears: findMatch('shelflifeyears', 'shelflife', 'lifespan', 'shelflifeyrs', 'expectedlife', 'cycle', 'useful life'),
     replacementCost: findMatch('replacementcost', 'hardwarecost', 'cost', 'unitcost', 'price', 'estimate', 'budget'),
     installationLaborCost: findMatch('installationlaborcost', 'laborcost', 'installationcost', 'labor', 'services'),
@@ -349,6 +351,22 @@ export function detectSuggestedMapping(headers: string[]): ColumnMapping {
     assignedTech: findMatch('assignedtech', 'tech', 'technician', 'lead', 'owner'),
     vendor: findMatch('vendor', 'integrator', 'contractor', 'partner'),
     notes: findMatch('notes', 'comments', 'remarks', 'memo', 'description'),
+    lastRenovationYear: findMatch('roomlastrenovationyear', 'lastrenovationyear', 'renovationyear', 'roomrenovationyear', 'lastrenovated', 'roomoverhaulyear', 'overhaulyear'),
+    renovationCost: findMatch(
+      'roomtotalinstallationcost',
+      'installationtotalcost',
+      'roominstallationcost',
+      'totalinstallationcost',
+      'roomtotalcost',
+      'roomrenovationcost',
+      'baselineroomrenovationcost',
+      'renovationcost',
+      'lastrenovationcost',
+      'roombaselinecost',
+      'baselinecost',
+      'overhaulcost',
+      'roomcost'
+    ),
   };
 }
 
@@ -417,6 +435,11 @@ export function processRowsWithMapping(rawData: Record<string, any>[], mapping: 
     const vendor = getVal(mapping.vendor) || 'AVC';
     const notes = getVal(mapping.notes) || '';
 
+    const rawRenoYear = getVal(mapping.lastRenovationYear);
+    const roomLastRenovationYear = rawRenoYear && !isNaN(parseInt(rawRenoYear, 10)) ? parseInt(rawRenoYear, 10) : undefined;
+    const rawRenoCost = getVal(mapping.renovationCost);
+    const roomBaselineCost = rawRenoCost && !isNaN(Number(rawRenoCost)) && Number(rawRenoCost) > 0 ? Number(rawRenoCost) : undefined;
+
     const id = `AV-${String(building).slice(0, 3).toUpperCase()}-${String(room).replace(/[^a-zA-Z0-9]/g, '')}-${index + 1}`;
 
     return enrichAVItem({
@@ -439,6 +462,8 @@ export function processRowsWithMapping(rawData: Record<string, any>[], mapping: 
       activeIssue: String(activeIssue).trim(),
       assignedTech: String(assignedTech).trim(),
       notes: String(notes).trim(),
+      roomLastRenovationYear,
+      roomBaselineCost,
     });
   });
 }
@@ -501,7 +526,11 @@ export async function parseSpreadsheetFile(file: File): Promise<{
     const { makeModel, serialNumber } = resolveEquipmentAndSerial(rawEq, rawSn, false);
     const rawCategory = findVal('category', 'equipmentcategory', 'equipcategory', 'equipmenttype', 'equiptype', 'itemtype', 'devicetype', 'type', 'class', 'group');
     const category = resolveCategory(rawCategory, makeModel);
-    const installDate = normalizeDate(findVal('installdate', 'purchased', 'dateinstalled', 'purchasedate', 'date', 'year'));
+    const rawDate = findVal('installyear', 'installationyear', 'yearinstalled', 'installdate', 'purchased', 'dateinstalled', 'purchasedate', 'date', 'year');
+    const installDate = normalizeDate(rawDate);
+    const installYear = !isNaN(parseInt(rawDate, 10)) && parseInt(rawDate, 10) >= 1990 && parseInt(rawDate, 10) <= 2040
+      ? parseInt(rawDate, 10)
+      : parseInt(installDate.slice(0, 4), 10);
     
     // Shelflife
     const rawLifespan = findVal('shelflifeyears', 'shelflife', 'lifespan', 'shelflifeyrs', 'expectedlife', 'cycle');
@@ -514,6 +543,28 @@ export async function parseSpreadsheetFile(file: File): Promise<{
     const rawLabor = findVal('installationlaborcost', 'laborcost', 'installationcost', 'labor', 'servicecost');
     const installationLaborCost = Number(rawLabor) >= 0 ? Number(rawLabor) : Math.round(replacementCost * 0.15);
 
+    const roomName = findVal('roomname', 'name', 'spacename', 'lab');
+    const spaceType = findVal('typeofspace', 'spacetype', 'roomtype', 'space', 'usage');
+    const vendor = findVal('vendor', 'integrator', 'contractor', 'partner');
+    const rawRenoYear = findVal('roomlastrenovationyear', 'lastrenovationyear', 'renovationyear', 'roomrenovationyear', 'lastrenovated', 'roomoverhaulyear', 'overhaulyear');
+    const roomLastRenovationYear = rawRenoYear && !isNaN(parseInt(rawRenoYear, 10)) ? parseInt(rawRenoYear, 10) : undefined;
+    const rawRenoCost = findVal(
+      'roomtotalinstallationcost',
+      'installationtotalcost',
+      'roominstallationcost',
+      'totalinstallationcost',
+      'roomtotalcost',
+      'roomrenovationcost',
+      'baselineroomrenovationcost',
+      'renovationcost',
+      'lastrenovationcost',
+      'roombaselinecost',
+      'baselinecost',
+      'overhaulcost',
+      'roomcost'
+    );
+    const roomBaselineCost = rawRenoCost && !isNaN(Number(rawRenoCost)) && Number(rawRenoCost) > 0 ? Number(rawRenoCost) : undefined;
+
     const condition = normalizeCondition(findVal('condition', 'state', 'health'));
     const maintenanceStatus = normalizeMaintenanceStatus(findVal('maintenancestatus', 'servicestatus', 'hardwarestatus', 'maintenance'));
     const activeIssue = normalizeActiveIssue(findVal('activeissue', 'maintenanceticket', 'serviceticket', 'maintenanceissue', 'defect'));
@@ -525,19 +576,25 @@ export async function parseSpreadsheetFile(file: File): Promise<{
     const enriched = enrichAVItem({
       id,
       room: String(room).trim(),
+      roomName: String(roomName).trim(),
       building: String(building).trim(),
+      spaceType: String(spaceType).trim(),
       category,
       makeModel: String(makeModel).trim(),
       serialNumber: String(serialNumber).trim(),
       installDate,
+      installYear,
       shelflifeYears,
       replacementCost,
       installationLaborCost,
+      vendor: String(vendor).trim(),
       condition,
       maintenanceStatus,
       activeIssue: String(activeIssue).trim(),
       assignedTech: String(assignedTech).trim(),
       notes: String(notes).trim(),
+      roomLastRenovationYear,
+      roomBaselineCost,
     });
 
     items.push(enriched);
@@ -557,13 +614,14 @@ export async function parseSpreadsheetFile(file: File): Promise<{
 export function downloadTemplateSpreadsheet(format: 'xlsx' | 'csv' = 'xlsx') {
   const headers = [
     {
-      'Asset ID': 'AV-SCI-101',
       'Building': 'Science & Technology Hall',
-      'Room / Space': 'Science 101 (Tiered Lecture)',
+      'Room / Space': 'Science 101',
+      'Room Name': 'Tiered Lecture Hall',
+      'Type of Space': 'Lecture Hall (Tiered)',
       'Equipment Category': 'Laser Projector',
       'Make / Model': 'Panasonic PT-MZ780 (7,000 lm)',
       'Serial / Asset Tag': 'PAN-90218-MZ7',
-      'Install Date (YYYY-MM-DD)': '2021-08-15',
+      'Install Year': 2021,
       'Shelflife / Lifespan (Years)': 5,
       'Replacement Cost ($)': 4800,
       'Installation / Labor Cost ($)': 850,
@@ -571,16 +629,20 @@ export function downloadTemplateSpreadsheet(format: 'xlsx' | 'csv' = 'xlsx') {
       'Maintenance Status': 'Operational',
       'Active Issue / Ticket': 'None',
       'Assigned Technician': 'Marcus Vance',
+      'Vendor': 'AVC Systems',
+      'Room Last Renovation Year': 2021,
+      'Room Total Installation Cost ($)': 90000,
       'Notes / Special Instructions': '180-seat flagship lecture hall',
     },
     {
-      'Asset ID': 'AV-ART-204',
       'Building': 'Fine Arts Complex',
-      'Room / Space': 'Arts 204 (Studio)',
+      'Room / Space': 'Arts 204',
+      'Room Name': 'Digital Studio',
+      'Type of Space': 'Lab (TL)',
       'Equipment Category': 'Interactive Touch Display',
       'Make / Model': 'Samsung Flip Pro 85"',
       'Serial / Asset Tag': 'SAM-88301-FLP',
-      'Install Date (YYYY-MM-DD)': '2020-09-01',
+      'Install Year': 2020,
       'Shelflife / Lifespan (Years)': 6,
       'Replacement Cost ($)': 3900,
       'Installation / Labor Cost ($)': 450,
@@ -588,16 +650,20 @@ export function downloadTemplateSpreadsheet(format: 'xlsx' | 'csv' = 'xlsx') {
       'Maintenance Status': 'Requires Service',
       'Active Issue / Ticket': 'Digitizer drift on lower corner',
       'Assigned Technician': 'Elena Rostova',
+      'Vendor': 'AVC Systems',
+      'Room Last Renovation Year': 2020,
+      'Room Total Installation Cost ($)': 55000,
       'Notes / Special Instructions': 'Used for digital drawing classes',
     },
     {
-      'Asset ID': 'AV-ENG-301',
       'Building': 'Engineering Research Center',
       'Room / Space': 'Engineering 301',
+      'Room Name': 'Standard Classroom',
+      'Type of Space': 'General Classroom',
       'Equipment Category': 'AV Matrix Switcher / Controller',
       'Make / Model': 'Crestron DMPS3-4K-350-C',
       'Serial / Asset Tag': 'CRS-77109-DMP',
-      'Install Date (YYYY-MM-DD)': '2019-04-10',
+      'Install Year': 2019,
       'Shelflife / Lifespan (Years)': 7,
       'Replacement Cost ($)': 7800,
       'Installation / Labor Cost ($)': 1600,
@@ -605,6 +671,9 @@ export function downloadTemplateSpreadsheet(format: 'xlsx' | 'csv' = 'xlsx') {
       'Maintenance Status': 'Scheduled Repair',
       'Active Issue / Ticket': 'DM 8G+ port 3 sync drop',
       'Assigned Technician': 'David Kim',
+      'Vendor': 'AVC Systems',
+      'Room Last Renovation Year': 2019,
+      'Room Total Installation Cost ($)': 35000,
       'Notes / Special Instructions': 'Overdue for replacement in upcoming fiscal year',
     },
   ];
@@ -618,40 +687,102 @@ export function downloadTemplateSpreadsheet(format: 'xlsx' | 'csv' = 'xlsx') {
 }
 
 /**
- * Exports current active items to Excel or CSV
+ * Exports current active items to Excel or CSV, ensuring room renovation & readiness fields are populated
  */
 export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 'xlsx', customFilename?: string) {
-  const exportRows = items.map((item) => ({
-    'Asset ID': item.id,
-    'Building': item.building,
-    'Room': item.room,
-    'Room Name': item.roomName || '',
-    'Type of Space': item.spaceType || '',
-    'Category': item.category,
-    'Make & Model': item.makeModel,
-    'Serial Number': item.serialNumber,
-    'Install Date': item.installDate,
-    'Age (Years)': item.ageYears,
-    'Shelflife (Years)': item.shelflifeYears,
-    'Remaining Life (Years)': item.remainingYears,
-    'Lifecycle Status': item.lifecycleStatus,
-    'Replacement Fiscal Year': item.replacementFiscalYear,
-    'Scheduled Quarter': item.scheduledQuarter || '',
-    'Replacement Cost ($)': item.replacementCost,
-    'Installation Labor Cost ($)': item.installationLaborCost,
-    'Total Replacement Cost ($)': item.totalReplacementCost,
-    'Physical Condition': item.condition,
-    'Maintenance Status': item.maintenanceStatus,
-    'Active Issue': item.activeIssue || 'None',
-    'Assigned Technician': item.assignedTech || '',
-    'Vendor': item.vendor || '',
-    'Notes': item.notes || '',
-  }));
+  // Ensure classroom packages calculations have populated room-level metadata
+  const packages = groupItemsIntoClassroomPackages(items);
+  const pkgMap = new Map<string, (typeof packages)[0]>();
+  packages.forEach((pkg) => {
+    pkgMap.set(`${pkg.building}::${pkg.roomName}`, pkg);
+  });
+
+  const exportRows = items.map((item) => {
+    const pkg = pkgMap.get(`${item.building}::${item.room}`);
+    const lastRenoYear = item.roomLastRenovationYear || pkg?.lastRenovationYear || '';
+    const baselineCost = item.roomBaselineCost || pkg?.lastRenovationCost || '';
+    const projectedCost = item.roomProjectedOverhaulCost || pkg?.projectedOverhaulCost || '';
+    const readinessScore = item.roomReadinessScore !== undefined ? item.roomReadinessScore : (pkg?.readinessScore ?? '');
+    const readinessRating = pkg?.readinessRating || '';
+    const installYear = item.installYear || (item.installDate ? item.installDate.slice(0, 4) : '');
+
+    return {
+      'Building': item.building,
+      'Room': item.room,
+      'Room Name': item.roomName || pkg?.roomDisplayName || '',
+      'Type of Space': item.spaceType || pkg?.spaceType || '',
+      'Category': item.category,
+      'Make & Model': item.makeModel,
+      'Serial Number': item.serialNumber,
+      'Install Year': installYear,
+      'Install Date': item.installDate,
+      'Age (Years)': item.ageYears,
+      'Shelflife (Years)': item.shelflifeYears,
+      'Remaining Life (Years)': item.remainingYears,
+      'Lifecycle Status': item.lifecycleStatus,
+      'Replacement Fiscal Year': item.replacementFiscalYear,
+      'Scheduled Quarter': item.scheduledQuarter || '',
+      'Replacement Cost ($)': item.replacementCost,
+      'Installation Labor Cost ($)': item.installationLaborCost,
+      'Total Replacement Cost ($)': item.totalReplacementCost,
+      'Physical Condition': item.condition,
+      'Maintenance Status': item.maintenanceStatus,
+      'Active Issue': item.activeIssue || 'None',
+      'Assigned Technician': item.assignedTech || '',
+      'Vendor': item.vendor || '',
+      'Notes': item.notes || '',
+      'Room Last Renovation Year': lastRenoYear,
+      'Room Total Installation Cost ($)': baselineCost,
+      'Inflation-Adjusted Overhaul Budget ($)': projectedCost,
+      'Room Readiness Score (0-100)': readinessScore,
+      'Room Readiness Rating': readinessRating,
+    };
+  });
 
   const worksheet = XLSX.utils.json_to_sheet(exportRows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'AV Fleet Inventory');
 
   const filename = customFilename || `College_AV_Inventory_Export_${new Date().toISOString().split('T')[0]}.${format}`;
+  XLSX.writeFile(workbook, filename, { bookType: format });
+}
+
+/**
+ * Exports whole-room integrated classroom packages to Excel or CSV
+ */
+export function exportClassroomPackages(packages: ClassroomPackage[], format: 'xlsx' | 'csv' = 'csv', customFilename?: string) {
+  const exportRows = packages.map((pkg) => ({
+    'Room / Classroom': pkg.roomName,
+    'Room Display Name': pkg.roomDisplayName,
+    'Building': pkg.building,
+    'Type of Space': pkg.spaceType || 'General Classroom',
+    'Primary Equipment Summary': pkg.primaryEquipmentSummary,
+    'Room Readiness Score (0-100)': pkg.readinessScore,
+    'Room Readiness Rating': pkg.readinessRating,
+    'Average Equipment Age (Years)': pkg.averageComponentAgeYears,
+    'Newest Component Age (Years)': pkg.newestComponentAgeYears,
+    'Oldest Component Age (Years)': pkg.oldestComponentAgeYears,
+    'Year Last Renovated': pkg.lastRenovationYear,
+    'Room Total Installation Cost ($)': pkg.lastRenovationCost,
+    'Installation Cost Source': pkg.isDefaultBaselineCost ? 'Standard Space-Type Benchmark Fallback' : 'Historical Actual',
+    'Target Overhaul Fiscal Year': pkg.projectedFiscalYear,
+    'Target Season / Window': pkg.targetSeason,
+    'Target Quarter': pkg.scheduledQuarter,
+    'Projected Turnkey Overhaul Budget ($)': pkg.projectedOverhaulCost,
+    'Compounding Inflation Rate': `${(pkg.inflationRate * 100).toFixed(0)}%/year`,
+    'Compounded Inflation Allowance ($)': pkg.inflationDeltaCost,
+    'Hardware BOM Cost ($)': pkg.totalHardwareCost,
+    'Installation & Labor Cost ($)': pkg.totalLaborCost,
+    'Total Line-Item BOM Package Cost ($)': pkg.totalPackageCost,
+    'Installed Devices Count': pkg.itemCount,
+    'Premature Interim Swaps Needed': pkg.prematureSwaps.length,
+    'Operational Status': pkg.hasCriticalFailure ? 'Classroom Down / Critical Repair' : pkg.overallCondition,
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Classroom Overhaul Schedule');
+
+  const filename = customFilename || `Classroom_Packages_Schedule_${new Date().toISOString().split('T')[0]}.${format}`;
   XLSX.writeFile(workbook, filename, { bookType: format });
 }

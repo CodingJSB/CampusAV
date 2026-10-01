@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { AVItem, ClassroomPackage, FiscalYearBudget, InventoryStats, QuarterExpense } from './types/inventory';
+import { AVItem, ClassroomPackage, FiscalYearBudget, InventoryStats, QuarterExpense, BudgetPlanningMode } from './types/inventory';
 import { getSampleInventory } from './data/sampleData';
 import {
   calculateInventoryStats,
@@ -18,7 +18,7 @@ import { InventoryTable } from './components/InventoryTable';
 import { ClassroomPackagesView } from './components/ClassroomPackagesView';
 import { ItemDetailModal } from './components/ItemDetailModal';
 import { BudgetReportModal } from './components/BudgetReportModal';
-import { exportActiveInventory } from './utils/spreadsheet';
+import { exportActiveInventory, exportClassroomPackages } from './utils/spreadsheet';
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -49,6 +49,9 @@ export default function App() {
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [selectedFY, setSelectedFY] = useState<string | null>(null);
 
+  // Budget Planning Mode: Whole Room Turnkey Overhaul (5% Compounded Inflation) vs Individual Component Swaps
+  const [planningMode, setPlanningMode] = useState<BudgetPlanningMode>('whole_room');
+
   // What-If Simulation State
   const [lifespanOffset, setLifespanOffset] = useState<number>(0); // -1, 0, +1, +2 years
   const [dashboardDirectoryView, setDashboardDirectoryView] = useState<'bundled' | 'components'>('bundled');
@@ -64,12 +67,21 @@ export default function App() {
     );
   }, [items, lifespanOffset]);
 
-  // Derived Analytics
-  const stats: InventoryStats = useMemo(() => calculateInventoryStats(simulatedItems), [simulatedItems]);
-  const fiscalBudgets: FiscalYearBudget[] = useMemo(() => calculateFiscalYearBudgets(simulatedItems), [simulatedItems]);
-  const nextQuarter: QuarterExpense = useMemo(() => calculateNextQuarterExpenses(simulatedItems), [simulatedItems]);
+  // Derived Analytics (Whole-Room packages computed first so inflation & readiness feed into budgets)
   const classroomPackages: ClassroomPackage[] = useMemo(
-    () => groupItemsIntoClassroomPackages(simulatedItems),
+    () => groupItemsIntoClassroomPackages(simulatedItems, 0.05),
+    [simulatedItems]
+  );
+  const stats: InventoryStats = useMemo(
+    () => calculateInventoryStats(simulatedItems, planningMode, classroomPackages),
+    [simulatedItems, planningMode, classroomPackages]
+  );
+  const fiscalBudgets: FiscalYearBudget[] = useMemo(
+    () => calculateFiscalYearBudgets(simulatedItems, undefined, planningMode, classroomPackages),
+    [simulatedItems, planningMode, classroomPackages]
+  );
+  const nextQuarter: QuarterExpense = useMemo(
+    () => calculateNextQuarterExpenses(simulatedItems),
     [simulatedItems]
   );
 
@@ -120,6 +132,29 @@ export default function App() {
     const filename = `${cleanName}_Updated_${dateStr}.${format}`;
     exportActiveInventory(items, format, filename);
     setLastExportedTime(new Date().toLocaleTimeString());
+  };
+
+  const handleDownloadPackagesFile = (format: 'csv' | 'xlsx' = 'csv') => {
+    const rawName = activeFilename ? activeFilename.replace(/\.[^/.]+$/, '') : 'Campus_AV';
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `${rawName}_Classroom_Packages_${dateStr}.${format}`;
+    exportClassroomPackages(classroomPackages, format, filename);
+  };
+
+  const handleUpdateRoomCost = (building: string, room: string, cost: number, year?: number) => {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.building === building && it.room === room) {
+          return enrichAVItem({
+            ...it,
+            roomBaselineCost: cost,
+            ...(year ? { roomLastRenovationYear: year } : {}),
+          });
+        }
+        return it;
+      })
+    );
+    setEditedCount((prev) => prev + 1);
   };
 
   const handleSelectFY = (fy: string | null) => {
@@ -222,7 +257,11 @@ export default function App() {
         ) : (
           <>
             {/* Key Fleet Metrics Cards */}
-            <MetricsCards stats={stats} onFilterClick={handleMetricCardFilter} />
+            <MetricsCards
+              stats={stats}
+              onFilterClick={handleMetricCardFilter}
+              planningMode={planningMode}
+            />
 
             {/* TAB: DASHBOARD & LIFECYCLE OVERVIEW */}
             {activeTab === 'dashboard' && (
@@ -277,6 +316,9 @@ export default function App() {
                   budgets={fiscalBudgets}
                   selectedFY={selectedFY}
                   onSelectFY={handleSelectFY}
+                  planningMode={planningMode}
+                  onTogglePlanningMode={setPlanningMode}
+                  inflationRate={0.05}
                 />
 
                 {/* Two-Column Grid: Next Quarter Action Card + What-If Simulation */}
@@ -524,6 +566,7 @@ export default function App() {
                       onOpenReportModal={() => setIsReportModalOpen(true)}
                       selectedFY={selectedFY}
                       onSelectFY={setSelectedFY}
+                      onUpdateRoomCost={handleUpdateRoomCost}
                     />
                   ) : (
                     <InventoryTable
@@ -544,6 +587,7 @@ export default function App() {
                 onOpenReportModal={() => setIsReportModalOpen(true)}
                 selectedFY={selectedFY}
                 onSelectFY={setSelectedFY}
+                onUpdateRoomCost={handleUpdateRoomCost}
               />
             )}
 

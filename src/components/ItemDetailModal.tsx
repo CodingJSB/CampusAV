@@ -168,14 +168,30 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
               />
             </div>
 
-            {/* Install Date */}
+            {/* Installation Year */}
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Installation Date</label>
+              <label className="block font-semibold text-slate-700 mb-1">Installation Year</label>
               <input
-                type="date"
-                value={formData.installDate}
-                onChange={(e) => handleChange('installDate', e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 text-slate-900 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                type="number"
+                min="1990"
+                max="2040"
+                step="1"
+                value={formData.installYear || (formData.installDate ? parseInt(formData.installDate.slice(0, 4), 10) : 2022)}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  if (!isNaN(val)) {
+                    setFormData((prev) => {
+                      const updated = {
+                        ...prev,
+                        installYear: val,
+                        installDate: `${val}-07-01`,
+                      };
+                      return enrichAVItem(updated);
+                    });
+                  }
+                }}
+                className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 font-mono text-slate-900 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                placeholder="e.g. 2021"
               />
             </div>
 
@@ -286,6 +302,50 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                 placeholder="e.g. 2026-Q4"
                 className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 font-mono text-slate-900 focus:bg-white focus:ring-2 focus:ring-sky-500"
               />
+            </div>
+          </div>
+
+          {/* Classroom Renovation Baseline & Whole-Room Cost Tracking */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-md space-y-3">
+            <div>
+              <h4 className="text-xs font-bold text-slate-900">
+                Classroom Full Renovation History & Baseline Project Cost
+              </h4>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Tracks when this room was fully renovated and total turnkey project cost. When left empty, uses Option (B) standard space-type benchmark ($35k general classroom, $55k lab, $90k lecture hall) with 5% annual compounding inflation.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Year Room Was Last Fully Renovated
+                </label>
+                <input
+                  type="number"
+                  min="2000"
+                  max="2035"
+                  value={formData.roomLastRenovationYear || ''}
+                  onChange={(e) => handleChange('roomLastRenovationYear', e.target.value ? parseInt(e.target.value, 10) : undefined)}
+                  placeholder="e.g. 2021 (Leave blank to use oldest device)"
+                  className="w-full bg-white border border-slate-300 rounded px-3 py-1.5 font-mono text-slate-900 focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Baseline Room Renovation Cost ($)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="500"
+                  value={formData.roomBaselineCost || ''}
+                  onChange={(e) => handleChange('roomBaselineCost', e.target.value ? Number(e.target.value) : undefined)}
+                  placeholder="e.g. 55000 (Leave blank for benchmark fallback)"
+                  className="w-full bg-white border border-slate-300 rounded px-3 py-1.5 font-mono text-slate-900 focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
             </div>
           </div>
 
