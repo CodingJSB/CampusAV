@@ -10,7 +10,7 @@ interface MetricsCardsProps {
 
 export const MetricsCards: React.FC<MetricsCardsProps> = ({ stats, onFilterClick, planningMode = 'whole_room' }) => {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       {/* 1. Fleet Size & Value */}
       <div className="bg-white border border-slate-200 rounded-lg p-4">
         <div className="flex items-center justify-between text-slate-500 mb-2">
@@ -39,23 +39,6 @@ export const MetricsCards: React.FC<MetricsCardsProps> = ({ stats, onFilterClick
         </div>
         <div className="mt-2 text-xs text-slate-500 flex items-center gap-1.5">
           <span>{planningMode === 'whole_room' ? 'Turnkey overhaul (5% inf.)' : 'Component line-items'}</span>
-        </div>
-      </div>
-
-      {/* 3. Next Quarter Projected Outlay */}
-      <div
-        onClick={() => onFilterClick && onFilterClick('quarter')}
-        className="bg-white border border-sky-200 rounded-lg p-4 cursor-pointer hover:border-sky-400 transition-colors"
-      >
-        <div className="flex items-center justify-between text-sky-800 mb-2">
-          <span className="text-xs font-semibold uppercase tracking-wider">Next Quarter Outlay</span>
-          <CalendarClock className="w-4 h-4 text-sky-600" />
-        </div>
-        <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
-          ${stats.nextQuarterProjectedExpense.toLocaleString()}
-        </div>
-        <div className="mt-2 text-xs text-sky-700 flex items-center gap-1.5">
-          <span>Immediate capital requirement →</span>
         </div>
       </div>
 

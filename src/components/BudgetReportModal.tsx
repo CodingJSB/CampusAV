@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { AVItem, ClassroomPackage, FiscalYearBudget, InventoryStats, QuarterExpense } from '../types/inventory';
+import { AVItem, ClassroomPackage, FiscalYearBudget, InventoryStats } from '../types/inventory';
 import { groupItemsIntoClassroomPackages } from '../utils/calculations';
-import { generateBudgetPlanningPDF } from '../utils/pdfGenerator';
+import { generateBudgetPlanningPDF, generateRoomReadinessPDF } from '../utils/pdfGenerator';
 import { FileText, FileDown, X, Printer, ShieldCheck, Check, Boxes } from 'lucide-react';
 
 interface BudgetReportModalProps {
@@ -9,7 +9,6 @@ interface BudgetReportModalProps {
   onClose: () => void;
   stats: InventoryStats;
   fiscalBudgets: FiscalYearBudget[];
-  nextQuarter: QuarterExpense;
   items: AVItem[];
 }
 
@@ -18,7 +17,6 @@ export const BudgetReportModal: React.FC<BudgetReportModalProps> = ({
   onClose,
   stats,
   fiscalBudgets,
-  nextQuarter,
   items,
 }) => {
   if (!isOpen) return null;
@@ -26,6 +24,7 @@ export const BudgetReportModal: React.FC<BudgetReportModalProps> = ({
   const [collegeName, setCollegeName] = useState('Central State College');
   const [departmentName, setDepartmentName] = useState('Classroom AV & Instructional Media');
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingReadiness, setIsExportingReadiness] = useState(false);
 
   const classroomPackages = useMemo(() => groupItemsIntoClassroomPackages(items), [items]);
 
@@ -37,10 +36,21 @@ export const BudgetReportModal: React.FC<BudgetReportModalProps> = ({
         departmentName,
         stats,
         fiscalBudgets,
-        nextQuarter,
         items,
       });
       setIsExporting(false);
+    }, 200);
+  };
+
+  const handleDownloadReadinessPDF = () => {
+    setIsExportingReadiness(true);
+    setTimeout(() => {
+      generateRoomReadinessPDF({
+        collegeName,
+        departmentName,
+        packages: classroomPackages,
+      });
+      setIsExportingReadiness(false);
     }, 200);
   };
 
@@ -75,12 +85,22 @@ export const BudgetReportModal: React.FC<BudgetReportModalProps> = ({
             </button>
 
             <button
+              onClick={handleDownloadReadinessPDF}
+              disabled={isExportingReadiness}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-300 rounded hover:bg-emerald-100 shadow-2xs transition-colors"
+              title="Download official color-coded Room Readiness Report (Red-Yellow-Green audit)"
+            >
+              <FileDown className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{isExportingReadiness ? 'Exporting...' : 'Room Readiness PDF'}</span>
+            </button>
+
+            <button
               onClick={handleDownloadPDF}
               disabled={isExporting}
               className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-sky-600 rounded hover:bg-sky-500 shadow-xs transition-colors"
             >
               <FileDown className="w-3.5 h-3.5" />
-              <span>{isExporting ? 'Generating PDF...' : 'Download PDF Report'}</span>
+              <span>{isExporting ? 'Generating PDF...' : 'Download CapEx PDF Report'}</span>
             </button>
 
             <button
@@ -152,68 +172,19 @@ export const BudgetReportModal: React.FC<BudgetReportModalProps> = ({
               <div className="text-[10px] text-slate-400">Scheduled turnover</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase font-semibold text-slate-500">Next Quarter Outlay</div>
-              <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">${nextQuarter.totalProjectedCost.toLocaleString()}</div>
-              <div className="text-[10px] text-slate-400">{nextQuarter.itemCount} urgent/scheduled items</div>
+              <div className="text-[10px] uppercase font-semibold text-slate-500">Overdue / Near EOL</div>
+              <div className="text-lg font-bold text-rose-700 font-mono tabular-nums">{stats.overdueCount} Overdue</div>
+              <div className="text-[10px] text-slate-400">{stats.nearingEolCount} units near EOL (&lt;1 yr)</div>
             </div>
           </div>
 
-          {/* Section 1: Next Quarter Itemized Plan */}
-          <div>
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide border-b border-slate-200 pb-1 mb-2">
-              Next Quarter ({nextQuarter.quarter}) Immediate Capital Outlay
-            </h3>
-            <p className="text-[11px] text-slate-500 mb-3">
-              Detailed funding requirement for items with critical failures or approaching predetermined shelf life in {nextQuarter.label}:
-            </p>
-
-            <table className="w-full text-left text-xs border border-slate-200">
-              <thead className="bg-slate-100 text-slate-700 font-semibold text-[11px]">
-                <tr className="border-b border-slate-200">
-                  <th className="py-2 px-3">Classroom / Room</th>
-                  <th className="py-2 px-3">Hardware Model</th>
-                  <th className="py-2 px-3">Category</th>
-                  <th className="py-2 px-3">Lifecycle / Issue</th>
-                  <th className="py-2 px-3 text-right">Projected Cost</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
-                {nextQuarter.items.slice(0, 8).map((it) => (
-                  <tr key={it.id}>
-                    <td className="py-2 px-3 font-sans font-medium text-slate-900">{it.room}</td>
-                    <td className="py-2 px-3 font-sans text-slate-800">{it.makeModel}</td>
-                    <td className="py-2 px-3 font-sans text-slate-600">{it.category}</td>
-                    <td className="py-2 px-3 font-sans">
-                      {it.lifecycleStatus === 'Past Lifespan / Overdue' ? (
-                        <span className="text-rose-700 font-semibold">Overdue ({it.ageYears} yrs)</span>
-                      ) : (
-                        <span className="text-slate-600">{it.maintenanceStatus}</span>
-                      )}
-                    </td>
-                    <td className="py-2 px-3 text-right font-semibold text-slate-900">
-                      ${it.totalReplacementCost.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
-                <tr>
-                  <td colSpan={4} className="py-2 px-3 text-right font-sans">Total Next Quarter Need:</td>
-                  <td className="py-2 px-3 text-right font-mono text-sky-700">
-                    ${nextQuarter.totalProjectedCost.toLocaleString()}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-
-          {/* Section 2: Classroom Bundled Retrofit Schedule */}
+          {/* Section 1: Classroom Bundled Retrofit Schedule */}
           <div>
             <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide border-b border-slate-200 pb-1 mb-2">
               Classroom Bundled Overhaul Projects (Whole-Room Renovations)
             </h3>
             <p className="text-[11px] text-slate-500 mb-3">
-              Higher education AV technology is refreshed as complete classroom packages during recess periods. Below is the room-by-room master retrofit capital schedule:
+              Higher education AV technology is refreshed on a yearly master schedule as complete classroom packages during recess periods. Below is the room-by-room master retrofit capital schedule:
             </p>
 
             <table className="w-full text-left text-xs border border-slate-200">

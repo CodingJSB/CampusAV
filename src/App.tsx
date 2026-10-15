@@ -1,10 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { AVItem, ClassroomPackage, FiscalYearBudget, InventoryStats, QuarterExpense, BudgetPlanningMode } from './types/inventory';
+import { AVItem, ClassroomPackage, FiscalYearBudget, InventoryStats, BudgetPlanningMode } from './types/inventory';
 import { getSampleInventory } from './data/sampleData';
 import {
   calculateInventoryStats,
   calculateFiscalYearBudgets,
-  calculateNextQuarterExpenses,
   enrichAVItem,
   groupItemsIntoClassroomPackages,
 } from './utils/calculations';
@@ -12,22 +11,25 @@ import { Header } from './components/Header';
 import { UploadZone } from './components/UploadZone';
 import { MetricsCards } from './components/MetricsCards';
 import { FiscalBudgetChart } from './components/FiscalBudgetChart';
-import { QuarterlyExpenseModule } from './components/QuarterlyExpenseModule';
 import { MaintenanceIssuesPanel } from './components/MaintenanceIssuesPanel';
 import { InventoryTable } from './components/InventoryTable';
 import { ClassroomPackagesView } from './components/ClassroomPackagesView';
 import { ItemDetailModal } from './components/ItemDetailModal';
 import { BudgetReportModal } from './components/BudgetReportModal';
-import { exportActiveInventory, exportClassroomPackages } from './utils/spreadsheet';
+import { RoomReadinessReportModal } from './components/RoomReadinessReportModal';
+import { exportActiveInventory, exportClassroomPackages, exportRoomReadinessReport } from './utils/spreadsheet';
+import { generateRoomReadinessPDF } from './utils/pdfGenerator';
 import {
   UploadCloud,
   FileSpreadsheet,
   FileDown,
+  FileText,
   ShieldCheck,
   RefreshCw,
   Sliders,
   CheckCircle2,
   AlertTriangle,
+  AlertCircle,
   ArrowRight,
   Info,
 } from 'lucide-react';
@@ -36,7 +38,7 @@ export default function App() {
   // Inventory state (transient in browser memory)
   const [items, setItems] = useState<AVItem[]>(() => getSampleInventory());
   const [activeFilename, setActiveFilename] = useState<string | null>('Sample_College_AV_Fleet.xlsx');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'bundled' | 'quarterly' | 'maintenance' | 'inventory' | 'reports'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'bundled' | 'maintenance' | 'inventory' | 'reports'>('dashboard');
 
   // Track edits made during session
   const [editedCount, setEditedCount] = useState<number>(0);
@@ -47,6 +49,8 @@ export default function App() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isReadinessModalOpen, setIsReadinessModalOpen] = useState(false);
+  const [isExportingReadinessQuick, setIsExportingReadinessQuick] = useState(false);
   const [selectedFY, setSelectedFY] = useState<string | null>(null);
 
   // Budget Planning Mode: Whole Room Turnkey Overhaul (5% Compounded Inflation) vs Individual Component Swaps
@@ -80,10 +84,39 @@ export default function App() {
     () => calculateFiscalYearBudgets(simulatedItems, undefined, planningMode, classroomPackages),
     [simulatedItems, planningMode, classroomPackages]
   );
-  const nextQuarter: QuarterExpense = useMemo(
-    () => calculateNextQuarterExpenses(simulatedItems),
-    [simulatedItems]
-  );
+
+  // Red-Yellow-Green Readiness Distribution Analytics
+  const readinessStats = useMemo(() => {
+    let green = 0;
+    let yellow = 0;
+    let red = 0;
+    let sum = 0;
+    classroomPackages.forEach((pkg) => {
+      sum += pkg.readinessScore;
+      if (pkg.readinessScore >= 60) green++;
+      else if (pkg.readinessScore >= 40) yellow++;
+      else red++;
+    });
+    const total = classroomPackages.length;
+    const avg = total > 0 ? Math.round(sum / total) : 0;
+    return { green, yellow, red, avg, total };
+  }, [classroomPackages]);
+
+  const handleDownloadReadinessPDF = () => {
+    setIsExportingReadinessQuick(true);
+    setTimeout(() => {
+      generateRoomReadinessPDF({
+        collegeName: 'Central State College',
+        departmentName: 'Classroom AV & Instructional Media',
+        packages: classroomPackages,
+      });
+      setIsExportingReadinessQuick(false);
+    }, 200);
+  };
+
+  const handleExportReadinessCSV = () => {
+    exportRoomReadinessReport(classroomPackages, 'csv');
+  };
 
   // Handlers
   const handleDataLoaded = (newItems: AVItem[], filename: string) => {
@@ -170,9 +203,7 @@ export default function App() {
   };
 
   const handleMetricCardFilter = (filterType: string) => {
-    if (filterType === 'quarter') {
-      setActiveTab('quarterly');
-    } else if (filterType === 'maintenance') {
+    if (filterType === 'maintenance') {
       setActiveTab('maintenance');
     } else if (filterType === 'overdue') {
       setActiveTab('inventory');
@@ -321,73 +352,74 @@ export default function App() {
                   inflationRate={0.05}
                 />
 
-                {/* Two-Column Grid: Next Quarter Action Card + What-If Simulation */}
+                {/* Two-Column Grid: Upcoming FY Action Card + What-If Simulation */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Next Quarter Highlight Card */}
+                  {/* Upcoming Fiscal Year Highlight Card */}
                   <div className="lg:col-span-2 bg-white border border-slate-200 rounded-lg p-5">
                     <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                       <div>
                         <h3 className="text-sm font-bold text-slate-900">
-                          Next Quarter Projected Expenses ({nextQuarter.quarter})
+                          Upcoming Fiscal Year Capital Upgrades
                         </h3>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          {nextQuarter.label} · Immediate equipment replacements and critical room repairs
+                          Annual budget forecast for scheduled classroom overhauls and overdue hardware replacements
                         </p>
                       </div>
                       <button
-                        onClick={() => setActiveTab('quarterly')}
+                        onClick={() => setActiveTab('bundled')}
                         className="text-xs font-semibold text-sky-600 hover:text-sky-800 flex items-center gap-1"
                       >
-                        <span>Full Forecast</span>
+                        <span>Classroom Packages</span>
                         <ArrowRight className="w-3 h-3" />
                       </button>
                     </div>
 
                     <div className="grid grid-cols-3 gap-3 my-4">
                       <div className="bg-slate-50 p-3 rounded">
-                        <span className="text-[10px] uppercase font-semibold text-slate-400">Total Need</span>
-                        <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">
-                          ${nextQuarter.totalProjectedCost.toLocaleString()}
+                        <span className="text-[10px] uppercase font-semibold text-slate-400">Upcoming CapEx Need</span>
+                        <div className="text-lg font-bold text-sky-700 font-mono tabular-nums">
+                          ${stats.nextFiscalYearBudget.toLocaleString()}
                         </div>
                       </div>
                       <div className="bg-rose-50/50 p-3 rounded">
-                        <span className="text-[10px] uppercase font-semibold text-rose-700">Overdue / Failing</span>
+                        <span className="text-[10px] uppercase font-semibold text-rose-700">Overdue for Replacement</span>
                         <div className="text-lg font-bold text-rose-900 font-mono tabular-nums">
-                          ${nextQuarter.overdueItemsCost.toLocaleString()}
+                          {stats.overdueCount} units
                         </div>
                       </div>
-                      <div className="bg-sky-50/50 p-3 rounded">
-                        <span className="text-[10px] uppercase font-semibold text-sky-700">Scheduled Turnovers</span>
-                        <div className="text-lg font-bold text-sky-900 font-mono tabular-nums">
-                          ${nextQuarter.replacementCost.toLocaleString()}
+                      <div className="bg-emerald-50/50 p-3 rounded">
+                        <span className="text-[10px] uppercase font-semibold text-emerald-800">Classroom Fleet Size</span>
+                        <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">
+                          {classroomPackages.length} rooms
                         </div>
                       </div>
                     </div>
 
-                    {/* Preview Table of Next Quarter items */}
+                    {/* Preview Table of Priority Classrooms */}
                     <div className="space-y-2">
                       <span className="text-xs font-semibold text-slate-700 block">
-                        Top Priority Classrooms:
+                        Priority Classrooms Due for Upgrade:
                       </span>
-                      {nextQuarter.items.slice(0, 3).map((item) => (
+                      {classroomPackages.slice(0, 3).map((pkg) => (
                         <div
-                          key={item.id}
-                          onClick={() => handleOpenItem(item)}
+                          key={`${pkg.building}-${pkg.roomName}`}
+                          onClick={() => {
+                            setActiveTab('bundled');
+                            setSelectedFY(pkg.projectedFiscalYear);
+                          }}
                           className="flex items-center justify-between p-2.5 rounded bg-slate-50 hover:bg-slate-100 cursor-pointer text-xs transition-colors"
                         >
                           <div>
-                            <span className="font-semibold text-slate-900">{item.room}</span>
+                            <span className="font-semibold text-slate-900">{pkg.roomDisplayName}</span>
                             <span className="text-slate-400 mx-1.5">·</span>
-                            <span className="text-slate-600">{item.makeModel}</span>
+                            <span className="text-slate-600">{pkg.building}</span>
                           </div>
                           <div className="flex items-center gap-3 font-mono tabular-nums">
-                            {item.lifecycleStatus === 'Past Lifespan / Overdue' && (
-                              <span className="text-[10px] font-sans font-semibold text-rose-700">
-                                Overdue EOL
-                              </span>
-                            )}
+                            <span className="text-[10px] font-sans font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                              {pkg.projectedFiscalYear} Overhaul
+                            </span>
                             <span className="font-semibold text-slate-900">
-                              ${item.totalReplacementCost.toLocaleString()}
+                              ${pkg.projectedOverhaulCost.toLocaleString()}
                             </span>
                           </div>
                         </div>
@@ -591,15 +623,6 @@ export default function App() {
               />
             )}
 
-            {/* TAB: NEXT QUARTER EXPENSES */}
-            {activeTab === 'quarterly' && (
-              <QuarterlyExpenseModule
-                items={simulatedItems}
-                onOpenReportModal={() => setIsReportModalOpen(true)}
-                onSelectItem={handleOpenItem}
-              />
-            )}
-
             {/* TAB: MAINTENANCE TICKETS */}
             {activeTab === 'maintenance' && (
               <MaintenanceIssuesPanel
@@ -630,44 +653,164 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB: AUTOMATED REPORTS */}
+            {/* TAB: AUTOMATED REPORTS / BUDGET PLANNING */}
             {activeTab === 'reports' && (
               <div className="space-y-6">
-                <div className="bg-white border border-slate-200 rounded-lg p-6">
-                  <div className="max-w-2xl">
-                    <h2 className="text-base font-bold text-slate-900">
-                      Automated Budget Planning & Capital Reports
-                    </h2>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Generate multi-page PDF documents formatted for college executive leadership, including board of trustees capital requests, next quarter expense commitments, and shelf-life policies.
-                    </p>
+                {/* 1. FEATURED: Room Readiness Report (Red-Yellow-Green Audit) */}
+                <div className="bg-white border-2 border-emerald-400/80 rounded-xl p-6 shadow-sm relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-radial from-emerald-100/60 to-transparent pointer-events-none"></div>
+                  
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                    <div className="max-w-2xl">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 uppercase tracking-wider flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          Red-Yellow-Green Health & Operational Readiness Audit
+                        </span>
+                        <span className="text-[11px] font-semibold text-slate-400 font-mono">
+                          Official Administrative Report
+                        </span>
+                      </div>
 
-                    <div className="mt-5 flex items-center gap-3">
+                      <h2 className="text-lg font-bold text-slate-900 tracking-tight">
+                        Room Readiness Report
+                      </h2>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        Comprehensive campus audit detailing building and room specifications, composite readiness scores (0–100), and clear factor-by-factor explanations of how each score is determined based on component shelf-life depreciation, active maintenance penalties, and hardware replacement valuations. Fully color-coded across Red, Yellow, and Green readiness levels.
+                      </p>
+
+                      {/* Live Red-Yellow-Green Distribution Metrics */}
+                      <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 font-semibold text-slate-700">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold">Campus Average:</span>
+                          <span className="font-mono font-bold text-slate-900">{readinessStats.avg} / 100</span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 font-semibold text-emerald-800">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                          <span>Green (Optimal/Good):</span>
+                          <span className="font-mono font-bold">{readinessStats.green} Rooms</span>
+                          <span className="text-[10px] text-emerald-600 font-normal">({readinessStats.total > 0 ? Math.round((readinessStats.green / readinessStats.total) * 100) : 0}%)</span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 font-semibold text-amber-800">
+                          <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                          <span>Yellow (Fair/Monitor):</span>
+                          <span className="font-mono font-bold">{readinessStats.yellow} Rooms</span>
+                          <span className="text-[10px] text-amber-600 font-normal">({readinessStats.total > 0 ? Math.round((readinessStats.yellow / readinessStats.total) * 100) : 0}%)</span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 border border-rose-200 font-semibold text-rose-800">
+                          <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                          <span>Red (Critical/Due):</span>
+                          <span className="font-mono font-bold">{readinessStats.red} Rooms</span>
+                          <span className="text-[10px] text-rose-600 font-normal">({readinessStats.total > 0 ? Math.round((readinessStats.red / readinessStats.total) * 100) : 0}%)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Report Download & Preview Actions */}
+                    <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 shrink-0 justify-center">
                       <button
-                        onClick={() => setIsReportModalOpen(true)}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-sky-600 rounded hover:bg-sky-500 shadow-xs"
+                        onClick={handleDownloadReadinessPDF}
+                        disabled={isExportingReadinessQuick}
+                        className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-lg shadow-sm transition-all"
                       >
                         <FileDown className="w-4 h-4" />
-                        <span>Preview & Export Official PDF Report</span>
+                        <span>{isExportingReadinessQuick ? 'Generating Report...' : 'Download Room Readiness Report (PDF)'}</span>
+                      </button>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setIsReadinessModalOpen(true)}
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shadow-2xs transition-colors"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Preview & Audit Rooms</span>
+                        </button>
+
+                        <button
+                          onClick={handleExportReadinessCSV}
+                          className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shadow-2xs transition-colors"
+                          title="Export report in CSV format"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>CSV</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Automated CapEx Budget Planning Report */}
+                <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-2xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="max-w-2xl">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800 uppercase tracking-wider">
+                          Executive CapEx Schedule
+                        </span>
+                        <span className="text-[11px] text-slate-400">Board of Trustees & Provost Format</span>
+                      </div>
+                      <h2 className="text-base font-bold text-slate-900">
+                        Classroom AV CapEx Lifecycle & Budget Planning Report
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Generate multi-page PDF documents formatted for college executive leadership, including board of trustees capital requests, upcoming fiscal year allocations, and shelf-life policies.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => setIsReportModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-sky-600 rounded-lg hover:bg-sky-500 shadow-xs transition-colors"
+                      >
+                        <FileDown className="w-4 h-4" />
+                        <span>Preview & Export CapEx PDF Report</span>
                       </button>
                     </div>
                   </div>
                 </div>
 
-                {/* Report Section Summary Preview */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Report Section Summary Preview (3 columns) */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="bg-white border border-slate-200 rounded-lg p-5">
-                    <h4 className="text-xs font-bold uppercase text-slate-700 tracking-wider mb-2">
-                      Report Section 1: Near-Term Needs
-                    </h4>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-xs font-bold uppercase text-slate-700 tracking-wider">
+                        Room Readiness Scoring
+                      </h4>
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                        0–100 Index
+                      </span>
+                    </div>
                     <p className="text-xs text-slate-500">
-                      Covers immediate next quarter capital allocation (${nextQuarter.totalProjectedCost.toLocaleString()}) and urgent replacement of {stats.overdueCount} overdue units.
+                      Evaluates each classroom via fractional remaining shelf life, automatic deductions for Out-of-Service tickets (-90 pts) and repair tickets (-30 pts), weighted by total hardware replacement value.
                     </p>
                   </div>
+
                   <div className="bg-white border border-slate-200 rounded-lg p-5">
-                    <h4 className="text-xs font-bold uppercase text-slate-700 tracking-wider mb-2">
-                      Report Section 2: Long-Term CapEx Schedule
-                    </h4>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-xs font-bold uppercase text-slate-700 tracking-wider">
+                        Upcoming FY Needs
+                      </h4>
+                      <span className="text-[10px] font-bold text-sky-700 bg-sky-50 px-1.5 py-0.2 rounded border border-sky-200 font-mono">
+                        ${stats.nextFiscalYearBudget.toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Covers upcoming fiscal year capital allocation (${stats.nextFiscalYearBudget.toLocaleString()}) and urgent replacement of {stats.overdueCount} overdue units.
+                    </p>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-lg p-5">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-xs font-bold uppercase text-slate-700 tracking-wider">
+                        Long-Term CapEx Forecast
+                      </h4>
+                      <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded font-mono">
+                        6-Year Horizon
+                      </span>
+                    </div>
                     <p className="text-xs text-slate-500">
                       Outlines 6-year capital forecasts from {fiscalBudgets[0]?.fiscalYear} through {fiscalBudgets[fiscalBudgets.length - 1]?.fiscalYear}, covering {stats.totalItems} fleet devices.
                     </p>
@@ -739,8 +882,14 @@ export default function App() {
         onClose={() => setIsReportModalOpen(false)}
         stats={stats}
         fiscalBudgets={fiscalBudgets}
-        nextQuarter={nextQuarter}
         items={simulatedItems}
+      />
+
+      {/* 4. Room Readiness Report Preview & PDF Export Modal */}
+      <RoomReadinessReportModal
+        isOpen={isReadinessModalOpen}
+        onClose={() => setIsReadinessModalOpen(false)}
+        packages={classroomPackages}
       />
     </div>
   );

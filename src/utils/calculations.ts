@@ -1,4 +1,4 @@
-import { AVItem, ClassroomPackage, FiscalYearBudget, InventoryStats, LifecycleStatus, QuarterExpense, BudgetPlanningMode } from '../types/inventory';
+import { AVItem, ClassroomPackage, FiscalYearBudget, InventoryStats, LifecycleStatus, BudgetPlanningMode } from '../types/inventory';
 
 // Reference date for calculations (defaults to current date, or fallback to current simulation time)
 export const SYSTEM_NOW = new Date();
@@ -41,27 +41,6 @@ export function getFiscalYearFromDate(date: Date, startMonth: number = 7): strin
   }
 }
 
-/**
- * Returns the calendar quarter string for a date (e.g., "2026-Q4")
- */
-export function getQuarterFromDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
-  const q = Math.ceil(month / 3);
-  return `${year}-Q${q}`;
-}
-
-export function getQuarterLabel(quarterStr: string): string {
-  const [yearStr, qStr] = quarterStr.split('-');
-  const qNum = qStr?.replace('Q', '') || '1';
-  const labels: Record<string, string> = {
-    '1': 'Winter / Early Spring (Jan–Mar)',
-    '2': 'Spring Finals / Summer Prep (Apr–Jun)',
-    '3': 'Summer AV Overhaul (Jul–Sep)',
-    '4': 'Fall Semester / Winter Break (Oct–Dec)',
-  };
-  return `${qStr} ${yearStr} · ${labels[qNum] || ''}`;
-}
 
 /**
  * Calculate age in decimal years from installDate or 4-digit installYear to reference date.
@@ -123,9 +102,6 @@ export function enrichAVItem(
 
   const totalReplacementCost = Number(item.replacementCost || 0) + Number(item.installationLaborCost || 0);
 
-  // If scheduledQuarter not provided, compute from replacementDate (Summer Q3 overhaul)
-  const scheduledQuarter = item.scheduledQuarter || (remainingYears <= 0 ? getQuarterFromDate(refDate) : `${replacementYear}-Q3`);
-
   return {
     ...item,
     installYear,
@@ -135,7 +111,6 @@ export function enrichAVItem(
     replacementFiscalYear,
     lifecycleStatus,
     totalReplacementCost,
-    scheduledQuarter,
   };
 }
 
@@ -206,6 +181,151 @@ export function calculateRoomReadinessScore(roomItems: AVItem[], refDate: Date =
     averageAge,
     newestAge,
     oldestAge,
+  };
+}
+
+export interface RoomReadinessExplanation {
+  score: number;
+  rating: 'Optimal' | 'Good' | 'Fair' | 'Critical / Due';
+  level: 'green' | 'yellow' | 'red';
+  levelLabel: string; // e.g. "Optimal / Good (Green)", "Fair / Moderate (Yellow)", "Critical / Due (Red)"
+  colorCode: {
+    badgeBg: string;
+    badgeText: string;
+    border: string;
+    hex: string;
+  };
+  summary: string;
+  lifecycleFactor: string;
+  maintenanceFactor: string;
+  weightingFactor: string;
+  actionRecommendation: string;
+}
+
+/**
+ * Returns a clear, structured explanation of how a classroom's composite readiness score
+ * was calculated based on its specific component ages, shelf-life, maintenance flags, and replacement costs.
+ */
+export function getRoomReadinessExplanation(pkg: ClassroomPackage): RoomReadinessExplanation {
+  const score = pkg.readinessScore;
+  let level: 'green' | 'yellow' | 'red' = 'green';
+  let levelLabel = 'Optimal / Good (Green)';
+  let colorCode = {
+    badgeBg: 'bg-emerald-100',
+    badgeText: 'text-emerald-800',
+    border: 'border-emerald-300',
+    hex: '#16A34A',
+  };
+
+  if (score >= 60) {
+    level = 'green';
+    levelLabel = score >= 80 ? 'Optimal (Green)' : 'Good (Green)';
+    colorCode = {
+      badgeBg: 'bg-emerald-100',
+      badgeText: 'text-emerald-800',
+      border: 'border-emerald-300',
+      hex: '#16A34A',
+    };
+  } else if (score >= 40) {
+    level = 'yellow';
+    levelLabel = 'Fair / Moderate (Yellow)';
+    colorCode = {
+      badgeBg: 'bg-amber-100',
+      badgeText: 'text-amber-800',
+      border: 'border-amber-300',
+      hex: '#D97706',
+    };
+  } else {
+    level = 'red';
+    levelLabel = 'Critical / Due (Red)';
+    colorCode = {
+      badgeBg: 'bg-rose-100',
+      badgeText: 'text-rose-800',
+      border: 'border-rose-300',
+      hex: '#DC2626',
+    };
+  }
+
+  const avgAge = pkg.averageComponentAgeYears;
+  const cycle = pkg.shelflifeYears || 6;
+  const remainingLifePct = Math.max(0, Math.round(((cycle - avgAge) / cycle) * 100));
+
+  let lifecycleFactor = `Average component age is ${avgAge} yrs vs a ${cycle}-yr academic overhaul cycle (~${remainingLifePct}% remaining shelf-life).`;
+  if (pkg.oldestComponentAgeYears >= cycle) {
+    lifecycleFactor += ` Oldest anchor unit is ${pkg.oldestComponentAgeYears} yrs old (overdue for refresh).`;
+  } else {
+    lifecycleFactor += ` Oldest component is ${pkg.oldestComponentAgeYears} yrs; newest component is ${pkg.newestComponentAgeYears} yrs.`;
+  }
+
+  // Maintenance & hardware health deductions
+  const deductions: string[] = [];
+  const outOfServiceItems = pkg.items.filter((it) => it.maintenanceStatus === 'Out of Service' || it.issueSeverity === 'Critical');
+  const serviceItems = pkg.items.filter((it) => it.maintenanceStatus === 'Requires Service' || it.maintenanceStatus === 'Scheduled Repair');
+  const poorItems = pkg.items.filter((it) => it.condition === 'Poor');
+
+  if (outOfServiceItems.length > 0) {
+    const names = outOfServiceItems.map((i) => `${i.category} (${i.makeModel})`).join(', ');
+    deductions.push(`Out-of-Service / Critical item [${names}] caps individual device score at 10%.`);
+  }
+  if (serviceItems.length > 0) {
+    const names = serviceItems.map((i) => `${i.category}`).join(', ');
+    deductions.push(`-30 pt maintenance penalty applied for active repair ticket on ${names}.`);
+  }
+  if (poorItems.length > 0) {
+    deductions.push(`-20 pt physical condition deduction applied for ${poorItems.length} unit in Poor condition.`);
+  }
+
+  let maintenanceFactor = '';
+  if (deductions.length > 0) {
+    maintenanceFactor = deductions.join(' ');
+  } else {
+    maintenanceFactor = `All ${pkg.itemCount} devices operational with zero open maintenance tickets and ${pkg.overallCondition.toLowerCase()} physical condition.`;
+  }
+
+  const weightingFactor = `Individual component scores are weighted by hardware replacement value ($${pkg.totalPackageCost.toLocaleString()} total package value across ${pkg.itemCount} assets), ensuring high-impact display and switching equipment dominate classroom readiness.`;
+
+  // Brief combined summary explanation
+  let summary = '';
+  let actionRecommendation = '';
+
+  if (level === 'green') {
+    if (deductions.length === 0) {
+      summary = `Score of ${score}/100: Healthy operational lifecycle with ${remainingLifePct}% remaining shelf-life (${avgAge} yrs avg age vs ${cycle}-yr cycle). All ${pkg.itemCount} components operational with zero open service tickets. Weighted by $${pkg.totalPackageCost.toLocaleString()} replacement value.`;
+      actionRecommendation = `Operating within optimal parameters. Maintain standard preventative maintenance.`;
+    } else {
+      summary = `Score of ${score}/100: Good baseline age (${avgAge} yrs avg) with minor service penalty: ${deductions[0]}. Weighted by $${pkg.totalPackageCost.toLocaleString()} replacement value.`;
+      actionRecommendation = `Resolve minor pending service ticket to return room to optimal status.`;
+    }
+  } else if (level === 'yellow') {
+    if (deductions.length > 0) {
+      summary = `Score of ${score}/100: Impacted by active maintenance flags (${deductions[0]}) combined with mid-to-late lifecycle hardware (${avgAge} yrs avg age vs ${cycle}-yr cycle). Weighted by $${pkg.totalPackageCost.toLocaleString()} replacement value.`;
+      actionRecommendation = `Dispatch technician for active repairs and monitor for upcoming ${pkg.projectedFiscalYear} capital retrofit.`;
+    } else {
+      summary = `Score of ${score}/100: Hardware nearing end of useful lifespan (~${remainingLifePct}% shelf-life remaining, oldest component ${pkg.oldestComponentAgeYears} yrs). Weighted by $${pkg.totalPackageCost.toLocaleString()} replacement value.`;
+      actionRecommendation = `Prioritize room for overhaul in ${pkg.projectedFiscalYear} budget allocation.`;
+    }
+  } else {
+    // Red
+    if (outOfServiceItems.length > 0) {
+      summary = `Critical Score of ${score}/100: Immediate classroom disruption! Contains ${outOfServiceItems.length} Out-of-Service / Critical device (${outOfServiceItems.map((i) => i.category).join(', ')}) capping score, plus ${avgAge} yrs avg equipment age. Heavy weighting on failed primary equipment ($${pkg.totalPackageCost.toLocaleString()} room value).`;
+      actionRecommendation = `Immediate field intervention required. Expedite component swap or emergency overhaul.`;
+    } else {
+      summary = `Critical Score of ${score}/100: Classroom hardware severely past academic shelf-life (${avgAge} yrs avg age exceeds ${cycle}-yr cycle, oldest ${pkg.oldestComponentAgeYears} yrs). High risk of unannounced in-class failure across $${pkg.totalPackageCost.toLocaleString()} fleet value.`;
+      actionRecommendation = `Include in highest priority Tier 1 CapEx replacement request for immediate funding.`;
+    }
+  }
+
+  return {
+    score,
+    rating: pkg.readinessRating,
+    level,
+    levelLabel,
+    colorCode,
+    summary,
+    lifecycleFactor,
+    maintenanceFactor,
+    weightingFactor,
+    actionRecommendation,
   };
 }
 
@@ -379,67 +499,6 @@ export function calculateFiscalYearBudgets(
 }
 
 /**
- * Calculates next quarter expense projections with detailed breakdown
- */
-export function calculateNextQuarterExpenses(items: AVItem[], targetQuarter?: string): QuarterExpense {
-  const currentQuarter = getQuarterFromDate(SYSTEM_NOW);
-  
-  // Calculate default next quarter: e.g., if current is 2026-Q3, next is 2026-Q4
-  let resolvedQuarter = targetQuarter;
-  if (!resolvedQuarter) {
-    const [yStr, qStr] = currentQuarter.split('-');
-    const curYear = parseInt(yStr, 10);
-    const curQ = parseInt(qStr.replace('Q', ''), 10);
-    if (curQ === 4) {
-      resolvedQuarter = `${curYear + 1}-Q1`;
-    } else {
-      resolvedQuarter = `${curYear}-Q${curQ + 1}`;
-    }
-  }
-
-  // Filter items that have maintenance issues or are due for replacement in this quarter
-  const quarterItems: AVItem[] = [];
-  let replacementCost = 0;
-  let maintenanceCost = 0;
-  let overdueItemsCost = 0;
-
-  items.forEach((item) => {
-    let included = false;
-
-    // Check if item is scheduled for replacement in this quarter or overdue
-    if (item.scheduledQuarter === resolvedQuarter) {
-      quarterItems.push(item);
-      replacementCost += item.totalReplacementCost;
-      included = true;
-    } else if (item.lifecycleStatus === 'Past Lifespan / Overdue' && (item.maintenanceStatus === 'Requires Service' || item.maintenanceStatus === 'Out of Service')) {
-      // Overdue items that are failing require immediate next quarter funding
-      quarterItems.push(item);
-      overdueItemsCost += item.totalReplacementCost;
-      included = true;
-    } else if (item.maintenanceStatus === 'Scheduled Repair' || item.maintenanceStatus === 'Requires Service') {
-      // Standard repair cost estimate (roughly 10-15% of replacement cost or minimum $250)
-      const estimatedRepair = Math.max(250, Math.round(item.replacementCost * 0.12));
-      quarterItems.push(item);
-      maintenanceCost += estimatedRepair;
-      included = true;
-    }
-  });
-
-  const totalProjectedCost = replacementCost + maintenanceCost + overdueItemsCost;
-
-  return {
-    quarter: resolvedQuarter,
-    label: getQuarterLabel(resolvedQuarter),
-    totalProjectedCost,
-    replacementCost,
-    maintenanceCost,
-    overdueItemsCost,
-    itemCount: quarterItems.length,
-    items: quarterItems,
-  };
-}
-
-/**
  * Computes high-level fleet statistics
  */
 export function calculateInventoryStats(
@@ -453,7 +512,6 @@ export function calculateInventoryStats(
       totalItems: 0,
       totalFleetReplacementValue: 0,
       nextFiscalYearBudget: 0,
-      nextQuarterProjectedExpense: 0,
       overdueCount: 0,
       nearingEolCount: 0,
       activeIssuesCount: 0,
@@ -495,14 +553,10 @@ export function calculateInventoryStats(
   const budgets = calculateFiscalYearBudgets(items, undefined, planningMode, classroomPackages);
   const nextFYBudget = budgets.find((b) => b.fiscalYear === currentFY)?.totalCost || 0;
 
-  // Next Quarter Projected Expense
-  const nextQ = calculateNextQuarterExpenses(items);
-
   return {
     totalItems,
     totalFleetReplacementValue,
     nextFiscalYearBudget: nextFYBudget,
-    nextQuarterProjectedExpense: nextQ.totalProjectedCost,
     overdueCount,
     nearingEolCount,
     activeIssuesCount,
@@ -516,7 +570,11 @@ export function calculateInventoryStats(
  * In college AV, rooms are typically overhauled as a complete bundled package,
  * with individual components swapped out early only if they fail prematurely.
  */
-export function groupItemsIntoClassroomPackages(items: AVItem[], inflationRate: number = 0.05): ClassroomPackage[] {
+export function groupItemsIntoClassroomPackages(
+  items: AVItem[],
+  inflationRate: number = 0.05,
+  refDate: Date = SYSTEM_NOW
+): ClassroomPackage[] {
   const roomMap: Record<string, AVItem[]> = {};
 
   items.forEach((item) => {
@@ -596,12 +654,8 @@ export function groupItemsIntoClassroomPackages(items: AVItem[], inflationRate: 
     const primaryEquipmentSummary = categoriesPresent.slice(0, 3).join(' + ') +
       (categoriesPresent.length > 3 ? ` + ${categoriesPresent.length - 3} more` : '');
 
-    // Target season
-    const targetSeason = anchorItem?.scheduledQuarter?.includes('Q3')
-      ? 'Summer Recess Overhaul'
-      : anchorItem?.scheduledQuarter?.includes('Q4')
-      ? 'Winter Break Overhaul'
-      : 'Mid-Year Upgrade Window';
+    // Target overhaul window
+    const targetSeason = 'Annual Summer Recess Overhaul';
 
     const roomFriendlyName = roomItems[0]?.roomName;
     const roomDisplayName = roomFriendlyName && roomFriendlyName !== 'Classroom' ? `${roomName} (${roomFriendlyName})` : roomName;
@@ -618,9 +672,16 @@ export function groupItemsIntoClassroomPackages(items: AVItem[], inflationRate: 
     // If not explicitly set in CSV or modal, fallback to Option (B) standard space-type benchmark
     const lastRenovationCost = explicitCost || getStandardRoomBaselineCost(spaceType);
 
-    // 2. Compounding Inflation Forecasting: (1 + inflationRate)^years
-    const projectedFYNum = parseInt(projectedFiscalYear.replace('FY', ''), 10) || (lastRenovationYear + shelflifeYears);
-    const deltaYears = Math.max(0, projectedFYNum - lastRenovationYear);
+    // 2. Compounding Inflation Forecasting: (1 + inflationRate)^years from CURRENT YEAR (2026)
+    // The baseline room cost ($35,000 for standard room, $55,000 lab, $90,000 lecture hall, or custom baseline)
+    // is set in current year dollars (2026).
+    // The 5% annual inflation is factored in based on this current year (2026), NOT based on the year it was installed.
+    // E.g., for 2026: deltaYears = 0 => $35,000 * 1.05^0 = $35,000
+    // E.g., for 2027: deltaYears = 1 => $35,000 * 1.05^1 = $36,750
+    // E.g., for 2028: deltaYears = 2 => $35,000 * 1.05^2 = $38,588
+    const baseYear = (refDate || SYSTEM_NOW).getFullYear() || 2026;
+    const projectedFYNum = parseInt(projectedFiscalYear.replace('FY', ''), 10) || baseYear;
+    const deltaYears = Math.max(0, projectedFYNum - baseYear);
     const inflationFactor = Math.pow(1 + inflationRate, deltaYears);
     const projectedOverhaulCost = Math.round(lastRenovationCost * inflationFactor);
     const inflationDeltaCost = Math.max(0, projectedOverhaulCost - lastRenovationCost);
@@ -653,6 +714,8 @@ export function groupItemsIntoClassroomPackages(items: AVItem[], inflationRate: 
       projectedOverhaulCost,
       inflationRate,
       inflationDeltaCost,
+      baseYear,
+      inflationYears: deltaYears,
       readinessScore: readiness.score,
       readinessRating: readiness.rating,
       averageComponentAgeYears: readiness.averageAge,
@@ -661,7 +724,6 @@ export function groupItemsIntoClassroomPackages(items: AVItem[], inflationRate: 
       lastOverhaulDate,
       shelflifeYears,
       projectedFiscalYear,
-      scheduledQuarter: anchorItem?.scheduledQuarter || `${projectedFYNum - 1}-Q3`,
       targetSeason,
       overallCondition,
       hasCriticalFailure,

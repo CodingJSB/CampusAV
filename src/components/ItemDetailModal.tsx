@@ -282,7 +282,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
               />
             </div>
 
-            {/* Technician & Quarter */}
+            {/* Assigned Technician */}
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Assigned Technician</label>
               <input
@@ -294,13 +294,13 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Scheduled Turnover Quarter</label>
+              <label className="block font-semibold text-slate-700 mb-1">Target Turnover Fiscal Year</label>
               <input
                 type="text"
-                value={formData.scheduledQuarter || ''}
-                onChange={(e) => handleChange('scheduledQuarter', e.target.value)}
-                placeholder="e.g. 2026-Q4"
-                className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 font-mono text-slate-900 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                readOnly
+                value={formData.replacementFiscalYear || 'FY2026'}
+                className="w-full bg-slate-100 border border-slate-300 rounded px-3 py-1.5 font-mono font-semibold text-slate-700 cursor-not-allowed"
+                title="Computed based on installation year and shelf life"
               />
             </div>
           </div>

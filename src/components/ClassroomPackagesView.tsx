@@ -321,7 +321,12 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
                         <span>${pkg.projectedOverhaulCost.toLocaleString()}</span>
                       </div>
                       <div className="text-[11px] text-slate-500 font-sans">
-                        Base: ${pkg.lastRenovationCost.toLocaleString()} + <span className="text-teal-700 font-mono font-medium">+${pkg.inflationDeltaCost.toLocaleString()} ({(pkg.inflationRate * 100).toFixed(0)}% inf)</span>
+                        Base: ${pkg.lastRenovationCost.toLocaleString()}
+                        {pkg.inflationDeltaCost > 0 ? (
+                          <> + <span className="text-teal-700 font-mono font-medium">+${pkg.inflationDeltaCost.toLocaleString()} ({pkg.inflationYears || 0} yr{(pkg.inflationYears || 0) === 1 ? '' : 's'} @ 5% from 2026)</span></>
+                        ) : (
+                          <span className="text-slate-400 font-mono text-[10px] ml-1">(current 2026 base)</span>
+                        )}
                       </div>
                       <div className="text-[10px] text-slate-400 font-sans mt-0.5">
                         Hardware BOM sum: ${pkg.totalPackageCost.toLocaleString()}
@@ -463,7 +468,7 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
                   Room Total Installation / Renovation Cost ($)
                 </label>
                 <p className="text-[11px] text-slate-500 mb-2">
-                  Enter the turnkey project cost to fully renovate this classroom (infrastructure, hardware, cabling, commissioning).
+                  Enter the turnkey project cost in current (2026) dollars. 5% annual compounding inflation is calculated forward starting from this current year (e.g. 2027 = base × 1.05).
                 </p>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">$</span>
@@ -519,30 +524,41 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
               </div>
 
               {/* Compounding Inflation Preview */}
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded font-mono text-xs space-y-1.5">
-                <div className="flex justify-between text-slate-600">
-                  <span>Scheduled Overhaul FY:</span>
-                  <strong className="text-slate-800">{editingRoom.projectedFiscalYear}</strong>
-                </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>Inflation Timeline:</span>
-                  <span>
-                    {Math.max(0, parseInt(editingRoom.projectedFiscalYear.replace('FY', ''), 10) - editYear)} years @ 5%/yr
-                  </span>
-                </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>Inflation Allowance:</span>
-                  <span className="text-teal-700 font-bold">
-                    +${Math.max(0, Math.round(editCost * Math.pow(1.05, Math.max(0, parseInt(editingRoom.projectedFiscalYear.replace('FY', ''), 10) - editYear)) - editCost)).toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between text-slate-900 border-t border-slate-200 pt-1 font-bold text-sm">
-                  <span>Projected Turnkey Overhaul:</span>
-                  <span className="text-sky-700">
-                    ${Math.round(editCost * Math.pow(1.05, Math.max(0, parseInt(editingRoom.projectedFiscalYear.replace('FY', ''), 10) - editYear))).toLocaleString()}
-                  </span>
-                </div>
-              </div>
+              {(() => {
+                const targetFY = parseInt(editingRoom.projectedFiscalYear.replace('FY', ''), 10) || 2026;
+                const deltaYears = Math.max(0, targetFY - 2026);
+                const projectedCost = Math.round(editCost * Math.pow(1.05, deltaYears));
+                const inflationAllowance = Math.max(0, projectedCost - editCost);
+
+                return (
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded font-mono text-xs space-y-1.5">
+                    <div className="flex justify-between text-slate-600">
+                      <span>Scheduled Overhaul FY:</span>
+                      <strong className="text-slate-800">{editingRoom.projectedFiscalYear}</strong>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>Inflation Timeline:</span>
+                      <span>
+                        {deltaYears === 0
+                          ? 'Current year (2026) · No future inflation'
+                          : `${deltaYears} year${deltaYears === 1 ? '' : 's'} from current year (2026) @ 5%/yr`}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>Inflation Allowance:</span>
+                      <span className="text-teal-700 font-bold">
+                        +${inflationAllowance.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-900 border-t border-slate-200 pt-1 font-bold text-sm">
+                      <span>Projected Turnkey Overhaul:</span>
+                      <span className="text-sky-700">
+                        ${projectedCost.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2">

@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { AVItem, ClassroomPackage, EquipmentCategory, EquipmentCondition, MaintenanceStatus } from '../types/inventory';
-import { enrichAVItem, groupItemsIntoClassroomPackages } from './calculations';
+import { enrichAVItem, getRoomReadinessExplanation, groupItemsIntoClassroomPackages } from './calculations';
 
 /**
  * Normalizes string keys for flexible header matching
@@ -721,7 +721,6 @@ export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 
       'Remaining Life (Years)': item.remainingYears,
       'Lifecycle Status': item.lifecycleStatus,
       'Replacement Fiscal Year': item.replacementFiscalYear,
-      'Scheduled Quarter': item.scheduledQuarter || '',
       'Replacement Cost ($)': item.replacementCost,
       'Installation Labor Cost ($)': item.installationLaborCost,
       'Total Replacement Cost ($)': item.totalReplacementCost,
@@ -767,10 +766,11 @@ export function exportClassroomPackages(packages: ClassroomPackage[], format: 'x
     'Installation Cost Source': pkg.isDefaultBaselineCost ? 'Standard Space-Type Benchmark Fallback' : 'Historical Actual',
     'Target Overhaul Fiscal Year': pkg.projectedFiscalYear,
     'Target Season / Window': pkg.targetSeason,
-    'Target Quarter': pkg.scheduledQuarter,
-    'Projected Turnkey Overhaul Budget ($)': pkg.projectedOverhaulCost,
+    'Inflation Base Year': pkg.baseYear || 2026,
+    'Years of Future Inflation': pkg.inflationYears ?? 0,
     'Compounding Inflation Rate': `${(pkg.inflationRate * 100).toFixed(0)}%/year`,
     'Compounded Inflation Allowance ($)': pkg.inflationDeltaCost,
+    'Projected Turnkey Overhaul Budget ($)': pkg.projectedOverhaulCost,
     'Hardware BOM Cost ($)': pkg.totalHardwareCost,
     'Installation & Labor Cost ($)': pkg.totalLaborCost,
     'Total Line-Item BOM Package Cost ($)': pkg.totalPackageCost,
@@ -784,5 +784,50 @@ export function exportClassroomPackages(packages: ClassroomPackage[], format: 'x
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Classroom Overhaul Schedule');
 
   const filename = customFilename || `Classroom_Packages_Schedule_${new Date().toISOString().split('T')[0]}.${format}`;
+  XLSX.writeFile(workbook, filename, { bookType: format });
+}
+
+/**
+ * Exports the Color-Coded Room Readiness Report with scoring explanations to Excel or CSV
+ */
+export function exportRoomReadinessReport(
+  packages: ClassroomPackage[],
+  format: 'xlsx' | 'csv' = 'csv',
+  customFilename?: string
+) {
+  const exportRows = packages.map((pkg) => {
+    const explanation = getRoomReadinessExplanation(pkg);
+    return {
+      'Building': pkg.building,
+      'Room Code': pkg.roomName,
+      'Room Display Name': pkg.roomDisplayName,
+      'Space Type': pkg.spaceType || 'General Classroom',
+      'Readiness Score (0-100)': pkg.readinessScore,
+      'Readiness Rating': pkg.readinessRating,
+      'Readiness Level': explanation.level.toUpperCase(),
+      'Readiness Level Label': explanation.levelLabel,
+      'Score Explanation Summary': explanation.summary,
+      'Lifecycle & Age Factor': explanation.lifecycleFactor,
+      'Maintenance & Health Factor': explanation.maintenanceFactor,
+      'Cost Weighting Factor': explanation.weightingFactor,
+      'Recommended Action': explanation.actionRecommendation,
+      'Installed Devices Count': pkg.itemCount,
+      'Primary Equipment': pkg.primaryEquipmentSummary,
+      'Average Component Age (Years)': pkg.averageComponentAgeYears,
+      'Oldest Component Age (Years)': pkg.oldestComponentAgeYears,
+      'Newest Component Age (Years)': pkg.newestComponentAgeYears,
+      'Overhaul Shelf-Life Cycle (Years)': pkg.shelflifeYears,
+      'Total Hardware Replacement Value ($)': pkg.totalPackageCost,
+      'Target Overhaul Fiscal Year': pkg.projectedFiscalYear,
+      'Operational Status': pkg.hasCriticalFailure ? 'Classroom Down / Critical Repair' : pkg.overallCondition,
+    };
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Room Readiness Audit');
+
+  const filename =
+    customFilename || `Room_Readiness_Report_${new Date().toISOString().split('T')[0]}.${format}`;
   XLSX.writeFile(workbook, filename, { bookType: format });
 }

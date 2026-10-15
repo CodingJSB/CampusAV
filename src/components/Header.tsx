@@ -2,8 +2,8 @@ import React from 'react';
 import { ShieldCheck, FileSpreadsheet, FileDown, UploadCloud, RefreshCw } from 'lucide-react';
 
 interface HeaderProps {
-  activeTab: 'dashboard' | 'bundled' | 'quarterly' | 'maintenance' | 'inventory' | 'reports';
-  setActiveTab: (tab: 'dashboard' | 'bundled' | 'quarterly' | 'maintenance' | 'inventory' | 'reports') => void;
+  activeTab: 'dashboard' | 'bundled' | 'maintenance' | 'inventory' | 'reports';
+  setActiveTab: (tab: 'dashboard' | 'bundled' | 'maintenance' | 'inventory' | 'reports') => void;
   onOpenUploadModal: () => void;
   onOpenReportModal: () => void;
   onResetToSample: () => void;
@@ -57,16 +57,6 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               Classroom Packages {roomCount ? `(${roomCount})` : ''}
-            </button>
-            <button
-              onClick={() => setActiveTab('quarterly')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
-                activeTab === 'quarterly'
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              Next Quarter Expenses
             </button>
             <button
               onClick={() => setActiveTab('maintenance')}

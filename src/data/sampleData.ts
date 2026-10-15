@@ -21,7 +21,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2035-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -42,7 +41,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -63,7 +61,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2035-Q3',
     assignedTech: 'AVC AV Support',
   },
 
@@ -86,7 +83,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -107,7 +103,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -128,7 +123,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -149,7 +143,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -170,7 +163,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -191,7 +183,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -212,7 +203,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -233,7 +223,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -254,7 +243,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -275,7 +263,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
 
@@ -298,7 +285,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -319,7 +305,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -340,7 +325,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -361,7 +345,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2035-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -382,7 +365,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -403,7 +385,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -424,7 +405,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -445,7 +425,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -466,7 +445,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
 
@@ -489,7 +467,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2035-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -510,7 +487,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -531,7 +507,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2035-Q3',
     assignedTech: 'AVC AV Support',
   },
 
@@ -554,7 +529,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -575,7 +549,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'None',
-    scheduledQuarter: '2032-Q3',
     assignedTech: 'AVC AV Support',
   },
 
@@ -599,7 +572,6 @@ const rawUserData = [
     vendor: 'AVC',
     activeIssue: 'Exceeded 7-year shelf life by 3 years; DM 8G port drops',
     issueSeverity: 'High' as const,
-    scheduledQuarter: '2026-Q4',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -620,7 +592,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'Touch digitizer sluggish',
-    scheduledQuarter: '2026-Q4',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -641,7 +612,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'Reached 5-year replacement threshold',
-    scheduledQuarter: '2026-Q4',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -662,7 +632,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'Reached 5-year replacement threshold',
-    scheduledQuarter: '2026-Q4',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -683,7 +652,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'Reached 10-year lifespan threshold',
-    scheduledQuarter: '2026-Q4',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -704,7 +672,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'Reached 10-year lifespan threshold',
-    scheduledQuarter: '2026-Q4',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -725,7 +692,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'Disc tray sticky',
-    scheduledQuarter: '2026-Q4',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -747,7 +713,6 @@ const rawUserData = [
     vendor: 'AVC',
     activeIssue: 'Wi-Fi gateway drops AirPlay; legacy firmware',
     issueSeverity: 'Medium' as const,
-    scheduledQuarter: '2026-Q4',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -768,7 +733,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'Light arm switch loose; camera sensor color cast',
-    scheduledQuarter: '2026-Q4',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -789,7 +753,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'USB 2.0 interface drops on newer MacBooks',
-    scheduledQuarter: '2026-Q4',
     assignedTech: 'AVC AV Support',
   },
   {
@@ -810,7 +773,6 @@ const rawUserData = [
     maintenanceStatus: 'Operational' as const,
     vendor: 'AVC',
     activeIssue: 'Acoustic echo canceller firmware out of warranty',
-    scheduledQuarter: '2026-Q4',
     assignedTech: 'AVC AV Support',
   },
 ];

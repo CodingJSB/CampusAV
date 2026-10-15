@@ -63,7 +63,6 @@ export interface AVItem {
   activeIssue?: string;
   issueSeverity?: 'Low' | 'Medium' | 'High' | 'Critical';
   lastMaintenanceDate?: string;
-  scheduledQuarter?: string; // e.g. "2026-Q4"
   assignedTech?: string;
   notes?: string;
 
@@ -100,11 +99,13 @@ export interface ClassroomPackage {
 
   // Historical Renovation & Inflation Forecasting
   lastRenovationYear: number; // Year room was last fully renovated (e.g. 2021)
-  lastRenovationCost: number; // Baseline project cost when renovated (e.g. $55,000)
+  lastRenovationCost: number; // Baseline project cost valued in current-year dollars (e.g. $35,000 / $55,000)
   isDefaultBaselineCost: boolean; // True if standard room benchmark was used as fallback
   projectedOverhaulCost: number; // Inflation-adjusted projected cost for the whole-room overhaul
   inflationRate: number; // Compounding inflation rate (e.g. 0.05 for 5%/year)
   inflationDeltaCost: number; // Additional budget needed due to inflation compounding
+  baseYear?: number; // Base valuation year (current year 2026)
+  inflationYears?: number; // Number of compounding years from current year (2026) to projected overhaul
 
   // Room Equipment Agedness & Readiness Composite Index (0-100)
   readinessScore: number; // 0-100 composite index
@@ -116,7 +117,6 @@ export interface ClassroomPackage {
   lastOverhaulDate: string; // Last full room upgrade date
   shelflifeYears: number; // Room overhaul cycle (e.g. 7 yrs)
   projectedFiscalYear: string; // FY when whole room is refreshed
-  scheduledQuarter: string; // e.g. "2026-Q4", "Summer 2027"
   targetSeason: string; // e.g. "Summer Overhaul", "Winter Break", "Mid-Year"
   overallCondition: EquipmentCondition;
   hasCriticalFailure: boolean;
@@ -144,22 +144,10 @@ export interface FiscalYearBudget {
   roomPackages?: ClassroomPackage[]; // Classroom packages scheduled for overhaul in this FY
 }
 
-export interface QuarterExpense {
-  quarter: string; // e.g. "2026-Q4", "2027-Q1"
-  label: string; // "Q4 2026 (Fall Semester)"
-  totalProjectedCost: number;
-  replacementCost: number;
-  maintenanceCost: number;
-  overdueItemsCost: number;
-  itemCount: number;
-  items: AVItem[];
-}
-
 export interface InventoryStats {
   totalItems: number;
   totalFleetReplacementValue: number;
   nextFiscalYearBudget: number;
-  nextQuarterProjectedExpense: number;
   overdueCount: number;
   nearingEolCount: number;
   activeIssuesCount: number;

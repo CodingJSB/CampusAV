@@ -375,11 +375,11 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
                       {isWholeRoom ? (
                         <div className="space-y-1 font-mono tabular-nums">
                           <div className="flex justify-between text-slate-300">
-                            <span>Base Overhauls:</span>
+                            <span>Base Overhauls (2026 $):</span>
                             <span>${Math.max(0, b.totalCost - (b.inflationDelta || 0)).toLocaleString()}</span>
                           </div>
                           <div className="flex justify-between text-teal-400">
-                            <span>+5% Inflation Delta:</span>
+                            <span>+5% Inflation (from 2026):</span>
                             <span>+${(b.inflationDelta || 0).toLocaleString()}</span>
                           </div>
                           <div className="flex justify-between font-bold text-white pt-1 border-t border-slate-700">
