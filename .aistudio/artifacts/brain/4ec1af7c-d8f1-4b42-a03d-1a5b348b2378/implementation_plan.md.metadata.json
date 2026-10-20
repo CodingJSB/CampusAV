@@ -1,0 +1,6 @@
+{
+  "summary": "Implementation plan for decoupling mechanical EOL from target fiscal years, adding an overlay-based multi-scenario planning engine with JSON import/export, interactive multi-year Kanban sequencing, batch scheduling, and a 1-click automated budget leveling algorithm while strictly maintaining a transient, browser-contained architecture.",
+  "updatedAt": "2026-10-15T19:13:02.470731990Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

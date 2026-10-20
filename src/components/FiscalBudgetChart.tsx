@@ -9,6 +9,7 @@ interface FiscalBudgetChartProps {
   planningMode?: BudgetPlanningMode;
   onTogglePlanningMode?: (mode: BudgetPlanningMode) => void;
   inflationRate?: number;
+  annualBudgetCeiling?: number;
 }
 
 export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
@@ -18,6 +19,7 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
   planningMode = 'whole_room',
   onTogglePlanningMode,
   inflationRate = 0.05,
+  annualBudgetCeiling,
 }) => {
   const [viewMode, setViewMode] = useState<'total' | 'split'>('split');
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -252,6 +254,20 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
           <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-white to-transparent pointer-events-none z-10" />
         )}
 
+        {/* Annual Budget Ceiling Reference Line */}
+        {annualBudgetCeiling && maxBudget > 0 && (
+          <div
+            className="absolute left-0 right-0 border-b-2 border-dashed border-rose-400 z-10 pointer-events-none flex items-center justify-end pr-3"
+            style={{
+              bottom: `${Math.round(Math.min(1, annualBudgetCeiling / maxBudget) * (chartHeight - 45)) + 46}px`,
+            }}
+          >
+            <span className="bg-rose-50 text-rose-700 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border border-rose-200 shadow-2xs">
+              Ceiling: ${(annualBudgetCeiling / 1000).toFixed(0)}k/yr
+            </span>
+          </div>
+        )}
+
         <div
           ref={scrollContainerRef}
           onScroll={checkScroll}
@@ -294,17 +310,26 @@ export const FiscalBudgetChart: React.FC<FiscalBudgetChartProps> = ({
                 >
                   {/* Value on Top */}
                   <div
-                    className={`text-[11px] font-mono tabular-nums font-semibold mb-1.5 text-center whitespace-nowrap transition-colors ${
-                      isSelected ? 'text-sky-700 font-bold' : 'text-slate-700 group-hover:text-sky-600'
+                    className={`text-[11px] font-mono tabular-nums font-semibold mb-1.5 text-center whitespace-nowrap transition-colors flex items-center justify-center gap-1 ${
+                      b.isOverCeiling
+                        ? 'text-rose-700 font-bold'
+                        : isSelected
+                        ? 'text-sky-700 font-bold'
+                        : 'text-slate-700 group-hover:text-sky-600'
                     }`}
                   >
-                    ${Math.round(b.totalCost / 1000)}k
+                    <span>${Math.round(b.totalCost / 1000)}k</span>
+                    {b.isOverCeiling && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-600 shrink-0" title="Exceeds Annual Budget Ceiling" />
+                    )}
                   </div>
 
                   {/* The Bar */}
                   <div
                     className={`w-full max-w-[54px] rounded-t-sm transition-all relative overflow-hidden group-hover:scale-y-[1.03] origin-bottom ${
-                      isSelected
+                      b.isOverCeiling
+                        ? 'ring-2 ring-rose-400 shadow-xs'
+                        : isSelected
                         ? 'ring-2 ring-sky-500 ring-offset-2 shadow-sm'
                         : 'group-hover:ring-1 group-hover:ring-sky-400 group-hover:ring-offset-1'
                     }`}

@@ -2,8 +2,8 @@ import React from 'react';
 import { ShieldCheck, FileSpreadsheet, FileDown, UploadCloud, RefreshCw } from 'lucide-react';
 
 interface HeaderProps {
-  activeTab: 'dashboard' | 'bundled' | 'maintenance' | 'inventory' | 'reports';
-  setActiveTab: (tab: 'dashboard' | 'bundled' | 'maintenance' | 'inventory' | 'reports') => void;
+  activeTab: 'dashboard' | 'bundled' | 'kanban' | 'maintenance' | 'inventory' | 'reports';
+  setActiveTab: (tab: 'dashboard' | 'bundled' | 'kanban' | 'maintenance' | 'inventory' | 'reports') => void;
   onOpenUploadModal: () => void;
   onOpenReportModal: () => void;
   onResetToSample: () => void;
@@ -37,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Zone 2: Navigation Links */}
-          <nav className="flex items-center gap-1 sm:gap-2">
+          <nav className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto">
             <button
               onClick={() => setActiveTab('dashboard')}
               className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
@@ -46,7 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
-              Overview & Lifecycle
+              Overview
             </button>
             <button
               onClick={() => setActiveTab('bundled')}
@@ -59,14 +59,17 @@ export const Header: React.FC<HeaderProps> = ({
               Classroom Packages {roomCount ? `(${roomCount})` : ''}
             </button>
             <button
-              onClick={() => setActiveTab('maintenance')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
-                activeTab === 'maintenance'
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              onClick={() => setActiveTab('kanban')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === 'kanban'
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-indigo-700 bg-indigo-50/60 hover:bg-indigo-100/80 hover:text-indigo-900 border border-indigo-200/60'
               }`}
             >
-              Maintenance Log
+              <span>CapEx Leveling</span>
+              <span className={`text-[10px] px-1 py-0.2 rounded-full font-bold ${activeTab === 'kanban' ? 'bg-indigo-800 text-white' : 'bg-indigo-200 text-indigo-800'}`}>
+                Kanban
+              </span>
             </button>
             <button
               onClick={() => setActiveTab('inventory')}
@@ -77,6 +80,16 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               Fleet Inventory ({itemCount})
+            </button>
+            <button
+              onClick={() => setActiveTab('maintenance')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                activeTab === 'maintenance'
+                  ? 'bg-slate-900 text-white'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              Maintenance Log
             </button>
             <button
               onClick={() => setActiveTab('reports')}

@@ -293,15 +293,44 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
               />
             </div>
 
+            {/* Decoupled Mechanical EOL vs Editable Target Fiscal Year */}
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Target Turnover Fiscal Year</label>
-              <input
-                type="text"
-                readOnly
-                value={formData.replacementFiscalYear || 'FY2026'}
-                className="w-full bg-slate-100 border border-slate-300 rounded px-3 py-1.5 font-mono font-semibold text-slate-700 cursor-not-allowed"
-                title="Computed based on installation year and shelf life"
-              />
+              <div className="flex justify-between items-center mb-1">
+                <label className="font-semibold text-slate-700">Target Planned Fiscal Year</label>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  Mech: {formData.mechanicalFiscalYear || 'FY2026'}
+                </span>
+              </div>
+              <select
+                value={formData.targetFiscalYear || formData.replacementFiscalYear || 'FY2026'}
+                onChange={(e) => handleChange('targetFiscalYear', e.target.value)}
+                className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 font-mono font-bold text-sky-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
+              >
+                <option value="FY2026">FY2026</option>
+                <option value="FY2027">FY2027</option>
+                <option value="FY2028">FY2028</option>
+                <option value="FY2029">FY2029</option>
+                <option value="FY2030">FY2030</option>
+                <option value="FY2031">FY2031</option>
+              </select>
+              {formData.isOverdue && (
+                <div className="text-[10px] text-rose-600 font-medium mt-0.5 flex items-center gap-1">
+                  <span>Hardware Overdue (Risk intact even if deferred)</span>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Planning Priority</label>
+              <select
+                value={formData.planningPriority || 'Standard'}
+                onChange={(e) => handleChange('planningPriority', e.target.value)}
+                className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 text-slate-900 focus:bg-white focus:ring-2 focus:ring-sky-500"
+              >
+                <option value="Critical">Critical (Lock against auto-deferral)</option>
+                <option value="Standard">Standard</option>
+                <option value="Elective">Elective / Low Priority</option>
+              </select>
             </div>
           </div>
 

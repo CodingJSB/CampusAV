@@ -1,19 +1,35 @@
 import React, { useState, useMemo } from 'react';
-import { AVItem, ClassroomPackage, FiscalYearBudget, InventoryStats, BudgetPlanningMode } from './types/inventory';
+import {
+  AVItem,
+  ClassroomPackage,
+  FiscalYearBudget,
+  InventoryStats,
+  BudgetPlanningMode,
+  PlanningScenario,
+  RoomPlanningOverride,
+  ItemPlanningOverride,
+} from './types/inventory';
 import { getSampleInventory } from './data/sampleData';
 import {
   calculateInventoryStats,
   calculateFiscalYearBudgets,
   enrichAVItem,
   groupItemsIntoClassroomPackages,
+  createDefaultBaselineScenario,
+  createLevelizedScenarioPreset,
+  resolveScenarioItems,
 } from './utils/calculations';
 import { Header } from './components/Header';
+import { ScenarioToolbar } from './components/ScenarioToolbar';
 import { UploadZone } from './components/UploadZone';
 import { MetricsCards } from './components/MetricsCards';
 import { FiscalBudgetChart } from './components/FiscalBudgetChart';
 import { MaintenanceIssuesPanel } from './components/MaintenanceIssuesPanel';
 import { InventoryTable } from './components/InventoryTable';
 import { ClassroomPackagesView } from './components/ClassroomPackagesView';
+import { BudgetKanbanBoard } from './components/BudgetKanbanBoard';
+import { AutoLevelerModal } from './components/AutoLevelerModal';
+import { BatchActionToolbar } from './components/BatchActionToolbar';
 import { ItemDetailModal } from './components/ItemDetailModal';
 import { BudgetReportModal } from './components/BudgetReportModal';
 import { RoomReadinessReportModal } from './components/RoomReadinessReportModal';
@@ -35,10 +51,22 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  // Inventory state (transient in browser memory)
-  const [items, setItems] = useState<AVItem[]>(() => getSampleInventory());
+  // Immutable Master Hardware Inventory (transient in browser memory)
+  const [masterItems, setMasterItems] = useState<AVItem[]>(() => getSampleInventory());
   const [activeFilename, setActiveFilename] = useState<string | null>('Sample_College_AV_Fleet.xlsx');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'bundled' | 'maintenance' | 'inventory' | 'reports'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'bundled' | 'kanban' | 'maintenance' | 'inventory' | 'reports'>('dashboard');
+
+  // Multi-Scenario Modeling State
+  const [scenarios, setScenarios] = useState<PlanningScenario[]>(() => {
+    const initialSample = getSampleInventory();
+    const baseline = createDefaultBaselineScenario();
+    const levelized = createLevelizedScenarioPreset(initialSample);
+    return [baseline, levelized];
+  });
+  const [activeScenarioId, setActiveScenarioId] = useState<string>('levelized-5yr');
+
+  // Batch Multi-Select State
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
 
   // Track edits made during session
   const [editedCount, setEditedCount] = useState<number>(0);
@@ -50,6 +78,7 @@ export default function App() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isReadinessModalOpen, setIsReadinessModalOpen] = useState(false);
+  const [isAutoLevelerOpen, setIsAutoLevelerOpen] = useState(false);
   const [isExportingReadinessQuick, setIsExportingReadinessQuick] = useState(false);
   const [selectedFY, setSelectedFY] = useState<string | null>(null);
 
@@ -60,29 +89,62 @@ export default function App() {
   const [lifespanOffset, setLifespanOffset] = useState<number>(0); // -1, 0, +1, +2 years
   const [dashboardDirectoryView, setDashboardDirectoryView] = useState<'bundled' | 'components'>('bundled');
 
+  // Active Scenario Branch
+  const activeScenario = useMemo(
+    () => scenarios.find((s) => s.id === activeScenarioId) || scenarios[0],
+    [scenarios, activeScenarioId]
+  );
+
+  // Dynamically resolve master items with active scenario planning overrides
+  const activeItems = useMemo(() => {
+    return resolveScenarioItems(masterItems, activeScenario);
+  }, [masterItems, activeScenario]);
+
   // Dynamically adjust items if What-If simulation slider is active
   const simulatedItems = useMemo(() => {
-    if (lifespanOffset === 0) return items;
-    return items.map((it) =>
+    if (lifespanOffset === 0) return activeItems;
+    return activeItems.map((it) =>
       enrichAVItem({
         ...it,
         shelflifeYears: Math.max(2, it.shelflifeYears + lifespanOffset),
       })
     );
-  }, [items, lifespanOffset]);
+  }, [activeItems, lifespanOffset]);
 
   // Derived Analytics (Whole-Room packages computed first so inflation & readiness feed into budgets)
   const classroomPackages: ClassroomPackage[] = useMemo(
-    () => groupItemsIntoClassroomPackages(simulatedItems, 0.05),
-    [simulatedItems]
+    () => groupItemsIntoClassroomPackages(simulatedItems, activeScenario.inflationRate || 0.05),
+    [simulatedItems, activeScenario.inflationRate]
   );
-  const stats: InventoryStats = useMemo(
-    () => calculateInventoryStats(simulatedItems, planningMode, classroomPackages),
-    [simulatedItems, planningMode, classroomPackages]
-  );
+
   const fiscalBudgets: FiscalYearBudget[] = useMemo(
-    () => calculateFiscalYearBudgets(simulatedItems, undefined, planningMode, classroomPackages),
-    [simulatedItems, planningMode, classroomPackages]
+    () =>
+      calculateFiscalYearBudgets(
+        simulatedItems,
+        undefined,
+        planningMode,
+        classroomPackages,
+        activeScenario.annualBudgetCeiling
+      ),
+    [simulatedItems, planningMode, classroomPackages, activeScenario.annualBudgetCeiling]
+  );
+
+  const stats: InventoryStats = useMemo(() => {
+    const s = calculateInventoryStats(simulatedItems, planningMode, classroomPackages);
+    const overCeilingCount = fiscalBudgets.filter((b) => b.isOverCeiling).length;
+    const deferredCount = simulatedItems.filter((i) => i.deferralYears > 0).length;
+    return {
+      ...s,
+      budgetCeiling: activeScenario.annualBudgetCeiling,
+      overCeilingYearsCount: overCeilingCount,
+      deferredCount,
+    };
+  }, [simulatedItems, planningMode, classroomPackages, fiscalBudgets, activeScenario.annualBudgetCeiling]);
+
+  // Count years exceeding ceiling
+  const overCeilingYearsCount = useMemo(
+    () => fiscalBudgets.filter((b) => b.isOverCeiling).length,
+    [fiscalBudgets]
   );
 
   // Red-Yellow-Green Readiness Distribution Analytics
@@ -118,31 +180,331 @@ export default function App() {
     exportRoomReadinessReport(classroomPackages, 'csv');
   };
 
-  // Handlers
+  // Scenario Handlers
+  const handleSelectScenario = (id: string) => {
+    setActiveScenarioId(id);
+    setSelectedItemIds([]);
+  };
+
+  const handleCreateScenario = (name: string, description: string, cloneFromActive: boolean) => {
+    const newId = `scenario-${Date.now()}`;
+    const newScenario: PlanningScenario = {
+      id: newId,
+      name,
+      description: description || `Created from ${activeScenario.name}`,
+      isBaseline: false,
+      annualBudgetCeiling: activeScenario.annualBudgetCeiling || 250000,
+      inflationRate: activeScenario.inflationRate || 0.05,
+      itemOverrides: cloneFromActive ? { ...activeScenario.itemOverrides } : {},
+      roomOverrides: cloneFromActive ? { ...activeScenario.roomOverrides } : {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setScenarios((prev) => [...prev, newScenario]);
+    setActiveScenarioId(newId);
+  };
+
+  const handleUpdateCeiling = (newCeiling: number) => {
+    setScenarios((prev) =>
+      prev.map((sc) => {
+        if (sc.id === activeScenarioId) {
+          return {
+            ...sc,
+            annualBudgetCeiling: newCeiling,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return sc;
+      })
+    );
+  };
+
+  const handleResetOverrides = () => {
+    setScenarios((prev) =>
+      prev.map((sc) => {
+        if (sc.id === activeScenarioId && !sc.isBaseline) {
+          return {
+            ...sc,
+            itemOverrides: {},
+            roomOverrides: {},
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return sc;
+      })
+    );
+    setSelectedItemIds([]);
+  };
+
+  const handleImportScenario = (importedScenario: PlanningScenario) => {
+    setScenarios((prev) => [...prev, importedScenario]);
+    setActiveScenarioId(importedScenario.id);
+  };
+
+  const handleApplyLevelingProposal = (proposedOverrides: Record<string, RoomPlanningOverride>) => {
+    // If active scenario is baseline, create a new branch automatically
+    let targetScenarioId = activeScenarioId;
+    if (activeScenario.isBaseline) {
+      const newId = `scenario-${Date.now()}`;
+      const newBranch: PlanningScenario = {
+        id: newId,
+        name: 'Auto-Leveled Plan',
+        description: 'Generated from 1-Click Smart Budget Leveler algorithm',
+        isBaseline: false,
+        annualBudgetCeiling: activeScenario.annualBudgetCeiling,
+        inflationRate: activeScenario.inflationRate,
+        itemOverrides: {},
+        roomOverrides: proposedOverrides,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      setScenarios((prev) => [...prev, newBranch]);
+      setActiveScenarioId(newId);
+      setEditedCount((prev) => prev + 1);
+      return;
+    }
+
+    setScenarios((prev) =>
+      prev.map((sc) => {
+        if (sc.id === targetScenarioId) {
+          return {
+            ...sc,
+            roomOverrides: {
+              ...sc.roomOverrides,
+              ...proposedOverrides,
+            },
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return sc;
+      })
+    );
+    setEditedCount((prev) => prev + 1);
+  };
+
+  const handleUpdateRoomSchedule = (building: string, room: string, targetFY: string) => {
+    const roomKey = `${building}::${room}`;
+    // If on baseline, clone to new branch
+    let targetId = activeScenarioId;
+    if (activeScenario.isBaseline) {
+      const newId = `scenario-${Date.now()}`;
+      const newBranch: PlanningScenario = {
+        id: newId,
+        name: 'Working CapEx Plan',
+        description: 'Editable branch created from baseline schedule',
+        isBaseline: false,
+        annualBudgetCeiling: activeScenario.annualBudgetCeiling,
+        inflationRate: activeScenario.inflationRate,
+        itemOverrides: {},
+        roomOverrides: {
+          [roomKey]: { targetFiscalYear: targetFY },
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      setScenarios((prev) => [...prev, newBranch]);
+      setActiveScenarioId(newId);
+      setEditedCount((prev) => prev + 1);
+      return;
+    }
+
+    setScenarios((prev) =>
+      prev.map((sc) => {
+        if (sc.id === targetId) {
+          return {
+            ...sc,
+            roomOverrides: {
+              ...sc.roomOverrides,
+              [roomKey]: {
+                ...sc.roomOverrides[roomKey],
+                targetFiscalYear: targetFY,
+              },
+            },
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return sc;
+      })
+    );
+    setEditedCount((prev) => prev + 1);
+  };
+
+  const handleUpdateRoomPriority = (
+    building: string,
+    room: string,
+    priority: 'Critical' | 'Standard' | 'Elective'
+  ) => {
+    const roomKey = `${building}::${room}`;
+    setScenarios((prev) =>
+      prev.map((sc) => {
+        if (sc.id === activeScenarioId && !sc.isBaseline) {
+          return {
+            ...sc,
+            roomOverrides: {
+              ...sc.roomOverrides,
+              [roomKey]: {
+                ...sc.roomOverrides[roomKey],
+                priority,
+              },
+            },
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return sc;
+      })
+    );
+  };
+
+  // Batch Multi-Select Handlers
+  const handleToggleSelectItem = (id: string) => {
+    setSelectedItemIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAll = (filteredIds: string[]) => {
+    const isAllSelected = filteredIds.every((id) => selectedItemIds.includes(id));
+    if (isAllSelected) {
+      setSelectedItemIds((prev) => prev.filter((id) => !filteredIds.includes(id)));
+    } else {
+      setSelectedItemIds((prev) => Array.from(new Set([...prev, ...filteredIds])));
+    }
+  };
+
+  const handleBatchAssignFY = (targetFY: string) => {
+    if (selectedItemIds.length === 0) return;
+    const overrides: Record<string, ItemPlanningOverride> = {};
+    selectedItemIds.forEach((id) => {
+      overrides[id] = {
+        ...activeScenario.itemOverrides[id],
+        targetFiscalYear: targetFY,
+      };
+    });
+
+    let targetId = activeScenarioId;
+    if (activeScenario.isBaseline) {
+      const newId = `scenario-${Date.now()}`;
+      const newBranch: PlanningScenario = {
+        id: newId,
+        name: 'Batch Scheduled Plan',
+        description: 'Branch with batch fiscal year reassignments',
+        isBaseline: false,
+        annualBudgetCeiling: activeScenario.annualBudgetCeiling,
+        inflationRate: activeScenario.inflationRate,
+        itemOverrides: overrides,
+        roomOverrides: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      setScenarios((prev) => [...prev, newBranch]);
+      setActiveScenarioId(newId);
+    } else {
+      setScenarios((prev) =>
+        prev.map((sc) => {
+          if (sc.id === targetId) {
+            return {
+              ...sc,
+              itemOverrides: {
+                ...sc.itemOverrides,
+                ...overrides,
+              },
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          return sc;
+        })
+      );
+    }
+
+    setEditedCount((prev) => prev + selectedItemIds.length);
+    setSelectedItemIds([]);
+  };
+
+  const handleBatchAssignPriority = (priority: 'Critical' | 'Standard' | 'Elective') => {
+    if (selectedItemIds.length === 0) return;
+    const overrides: Record<string, ItemPlanningOverride> = {};
+    selectedItemIds.forEach((id) => {
+      overrides[id] = {
+        ...activeScenario.itemOverrides[id],
+        priority,
+      };
+    });
+
+    setScenarios((prev) =>
+      prev.map((sc) => {
+        if (sc.id === activeScenarioId && !sc.isBaseline) {
+          return {
+            ...sc,
+            itemOverrides: {
+              ...sc.itemOverrides,
+              ...overrides,
+            },
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return sc;
+      })
+    );
+  };
+
+  const handleBatchResetBaseline = () => {
+    if (selectedItemIds.length === 0) return;
+    setScenarios((prev) =>
+      prev.map((sc) => {
+        if (sc.id === activeScenarioId && !sc.isBaseline) {
+          const nextOverrides = { ...sc.itemOverrides };
+          selectedItemIds.forEach((id) => {
+            delete nextOverrides[id];
+          });
+          return {
+            ...sc,
+            itemOverrides: nextOverrides,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return sc;
+      })
+    );
+    setSelectedItemIds([]);
+  };
+
+  // General Handlers
   const handleDataLoaded = (newItems: AVItem[], filename: string) => {
-    setItems(newItems);
+    setMasterItems(newItems);
     setActiveFilename(filename);
     setSelectedFY(null);
     setLifespanOffset(0);
     setEditedCount(0);
     setLastExportedTime(null);
+    setSelectedItemIds([]);
+    const baseline = createDefaultBaselineScenario();
+    const levelized = createLevelizedScenarioPreset(newItems);
+    setScenarios([baseline, levelized]);
+    setActiveScenarioId(levelized.id);
   };
 
   const handleResetToSample = () => {
-    setItems(getSampleInventory());
+    const sample = getSampleInventory();
+    setMasterItems(sample);
     setActiveFilename('Sample_College_AV_Fleet.xlsx');
     setSelectedFY(null);
     setLifespanOffset(0);
     setEditedCount(0);
     setLastExportedTime(null);
+    setSelectedItemIds([]);
+    const baseline = createDefaultBaselineScenario();
+    const levelized = createLevelizedScenarioPreset(sample);
+    setScenarios([baseline, levelized]);
+    setActiveScenarioId(levelized.id);
   };
 
   const handleClearData = () => {
-    setItems([]);
+    setMasterItems([]);
     setActiveFilename(null);
     setSelectedFY(null);
     setEditedCount(0);
     setLastExportedTime(null);
+    setSelectedItemIds([]);
   };
 
   const handleOpenItem = (item: AVItem) => {
@@ -151,7 +513,8 @@ export default function App() {
   };
 
   const handleUpdateItem = (updatedItem: AVItem) => {
-    setItems((prev) => prev.map((it) => (it.id === updatedItem.id ? updatedItem : it)));
+    // Physical inventory fields update masterItems
+    setMasterItems((prev) => prev.map((it) => (it.id === updatedItem.id ? updatedItem : it)));
     setEditedCount((prev) => prev + 1);
     if (selectedItem?.id === updatedItem.id) {
       setSelectedItem(updatedItem);
@@ -163,7 +526,7 @@ export default function App() {
     const cleanName = rawName.replace(/_Updated_\d{4}-\d{2}-\d{2}$/, '');
     const dateStr = new Date().toISOString().split('T')[0];
     const filename = `${cleanName}_Updated_${dateStr}.${format}`;
-    exportActiveInventory(items, format, filename);
+    exportActiveInventory(activeItems, format, filename, activeScenario.name);
     setLastExportedTime(new Date().toLocaleTimeString());
   };
 
@@ -175,16 +538,23 @@ export default function App() {
   };
 
   const handleUpdateRoomCost = (building: string, room: string, cost: number, year?: number) => {
-    setItems((prev) =>
-      prev.map((it) => {
-        if (it.building === building && it.room === room) {
-          return enrichAVItem({
-            ...it,
-            roomBaselineCost: cost,
-            ...(year ? { roomLastRenovationYear: year } : {}),
-          });
+    const roomKey = `${building}::${room}`;
+    setScenarios((prev) =>
+      prev.map((sc) => {
+        if (sc.id === activeScenarioId && !sc.isBaseline) {
+          return {
+            ...sc,
+            roomOverrides: {
+              ...sc.roomOverrides,
+              [roomKey]: {
+                ...sc.roomOverrides[roomKey],
+                customBaselineCost: cost,
+              },
+            },
+            updatedAt: new Date().toISOString(),
+          };
         }
-        return it;
+        return sc;
       })
     );
     setEditedCount((prev) => prev + 1);
@@ -210,6 +580,13 @@ export default function App() {
     }
   };
 
+  // Selected items calculation for floating toolbar
+  const selectedItemsData = useMemo(() => {
+    const selected = activeItems.filter((it) => selectedItemIds.includes(it.id));
+    const totalCost = selected.reduce((acc, it) => acc + it.totalReplacementCost, 0);
+    return { count: selected.length, totalCost };
+  }, [activeItems, selectedItemIds]);
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       {/* Top Bar Header */}
@@ -219,9 +596,24 @@ export default function App() {
         onOpenUploadModal={() => setIsUploadModalOpen(true)}
         onOpenReportModal={() => setIsReportModalOpen(true)}
         onResetToSample={handleResetToSample}
-        itemCount={items.length}
+        itemCount={masterItems.length}
         roomCount={classroomPackages.length}
       />
+
+      {/* Scenario Management Toolbar */}
+      {masterItems.length > 0 && (
+        <ScenarioToolbar
+          scenarios={scenarios}
+          activeScenarioId={activeScenarioId}
+          onSelectScenario={handleSelectScenario}
+          onCreateScenario={handleCreateScenario}
+          onUpdateCeiling={handleUpdateCeiling}
+          onResetOverrides={handleResetOverrides}
+          onImportScenario={handleImportScenario}
+          onOpenAutoLeveler={() => setIsAutoLevelerOpen(true)}
+          overCeilingYearsCount={overCeilingYearsCount}
+        />
+      )}
 
       {/* Active Dataset & Privacy Notice Sub-banner */}
       <div className="bg-white border-b border-slate-200">
@@ -231,7 +623,7 @@ export default function App() {
             <span>Active Sheet:</span>
             <strong className="font-mono text-slate-800">{activeFilename || 'None loaded'}</strong>
             <span className="text-slate-300">·</span>
-            <span>{items.length} Classrooms/Assets Tracked</span>
+            <span>{masterItems.length} Classrooms/Assets Tracked</span>
             {editedCount > 0 && (
               <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-300">
                 {editedCount} edit{editedCount > 1 ? 's' : ''} saved
@@ -280,7 +672,7 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* If no items loaded, show prominent upload zone */}
-        {items.length === 0 ? (
+        {masterItems.length === 0 ? (
           <UploadZone
             onDataLoaded={handleDataLoaded}
             onLoadSample={handleResetToSample}
@@ -350,6 +742,7 @@ export default function App() {
                   planningMode={planningMode}
                   onTogglePlanningMode={setPlanningMode}
                   inflationRate={0.05}
+                  annualBudgetCeiling={activeScenario.annualBudgetCeiling}
                 />
 
                 {/* Two-Column Grid: Upcoming FY Action Card + What-If Simulation */}
@@ -605,6 +998,9 @@ export default function App() {
                       items={simulatedItems}
                       onSelectItem={handleOpenItem}
                       selectedFY={selectedFY}
+                      selectedItemIds={selectedItemIds}
+                      onToggleSelectItem={handleToggleSelectItem}
+                      onToggleSelectAll={handleToggleSelectAll}
                     />
                   )}
                 </div>
@@ -620,6 +1016,22 @@ export default function App() {
                 selectedFY={selectedFY}
                 onSelectFY={setSelectedFY}
                 onUpdateRoomCost={handleUpdateRoomCost}
+              />
+            )}
+
+            {/* TAB: CAPEX LEVELING KANBAN BOARD */}
+            {activeTab === 'kanban' && (
+              <BudgetKanbanBoard
+                classroomPackages={classroomPackages}
+                items={simulatedItems}
+                activeScenario={activeScenario}
+                onUpdateRoomSchedule={handleUpdateRoomSchedule}
+                onUpdateRoomPriority={handleUpdateRoomPriority}
+                onSelectRoom={(room, bldg) => {
+                  setSelectedFY(null);
+                  setActiveTab('bundled');
+                }}
+                onOpenAutoLeveler={() => setIsAutoLevelerOpen(true)}
               />
             )}
 
@@ -641,7 +1053,7 @@ export default function App() {
                       Complete Classroom AV Inventory & Lifecycles
                     </h2>
                     <p className="text-xs text-slate-500">
-                      Filter by building, category, physical condition, and replacement fiscal year.
+                      Filter by building, category, physical condition, and replacement fiscal year. Use checkboxes for bulk fiscal year assignment.
                     </p>
                   </div>
                 </div>
@@ -649,6 +1061,9 @@ export default function App() {
                   items={simulatedItems}
                   onSelectItem={handleOpenItem}
                   selectedFY={selectedFY}
+                  selectedItemIds={selectedItemIds}
+                  onToggleSelectItem={handleToggleSelectItem}
+                  onToggleSelectAll={handleToggleSelectAll}
                 />
               </div>
             )}
@@ -890,6 +1305,25 @@ export default function App() {
         isOpen={isReadinessModalOpen}
         onClose={() => setIsReadinessModalOpen(false)}
         packages={classroomPackages}
+      />
+
+      {/* 5. 1-Click Automated Budget Leveler Modal */}
+      <AutoLevelerModal
+        isOpen={isAutoLevelerOpen}
+        onClose={() => setIsAutoLevelerOpen(false)}
+        classroomPackages={classroomPackages}
+        activeScenario={activeScenario}
+        onApplyProposal={handleApplyLevelingProposal}
+      />
+
+      {/* 6. Floating Batch Action Toolbar */}
+      <BatchActionToolbar
+        selectedCount={selectedItemsData.count}
+        selectedTotalCost={selectedItemsData.totalCost}
+        onClearSelection={() => setSelectedItemIds([])}
+        onBatchAssignFY={handleBatchAssignFY}
+        onBatchAssignPriority={handleBatchAssignPriority}
+        onBatchResetBaseline={handleBatchResetBaseline}
       />
     </div>
   );

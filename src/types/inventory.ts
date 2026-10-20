@@ -43,6 +43,32 @@ export type LifecycleStatus =
   | 'Nearing End of Life'
   | 'Past Lifespan / Overdue';
 
+export interface ItemPlanningOverride {
+  targetFiscalYear?: string;
+  notes?: string;
+  priority?: 'Critical' | 'Standard' | 'Elective';
+}
+
+export interface RoomPlanningOverride {
+  targetFiscalYear?: string;
+  customBaselineCost?: number;
+  notes?: string;
+  priority?: 'Critical' | 'Standard' | 'Elective';
+}
+
+export interface PlanningScenario {
+  id: string;
+  name: string; // e.g. "Baseline (Mechanical EOL)", "5-Year Levelized CapEx", "Conservative Triage"
+  description: string;
+  isBaseline: boolean; // True for read-only mechanical baseline
+  annualBudgetCeiling: number; // e.g., 250000 ($250k / year)
+  inflationRate: number; // e.g. 0.05
+  itemOverrides: Record<string, ItemPlanningOverride>; // Keyed by item.id
+  roomOverrides: Record<string, RoomPlanningOverride>; // Keyed by `${building}::${room}`
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AVItem {
   id: string; // e.g. "AV-NH-105-1"
   room: string; // e.g. "NH-105"
@@ -69,11 +95,20 @@ export interface AVItem {
   // Calculated fields
   ageYears: number;
   remainingYears: number;
-  replacementFiscalYear: string; // e.g. "FY2027"
+  replacementFiscalYear: string; // Active fiscal year (defaults to target or mechanical)
   lifecycleStatus: LifecycleStatus;
   totalReplacementCost: number; // replacementCost + installationLaborCost
   isPrematureSwap?: boolean; // Flagged for early component replacement before room overhaul
   roomPackageId?: string; // Grouping identifier for the classroom
+
+  // Decoupled Mechanical EOL vs Financial Target FY
+  mechanicalEOLYear: number; // Raw installYear + shelflifeYears
+  mechanicalFiscalYear: string; // Raw mechanical replacement FY (e.g. "FY2023" or "FY2027")
+  targetFiscalYear: string; // Financial scheduled FY (editable in scenario branches)
+  isOverdue: boolean; // Strictly based on hardware age (installYear + shelflifeYears <= currentYear). NEVER cleared by deferral!
+  deferralYears: number; // Difference between target fiscal year and mechanical EOL
+  deferralRiskLevel: 'None' | 'Moderate' | 'High' | 'Severe';
+  planningPriority?: 'Critical' | 'Standard' | 'Elective';
 
   // Whole-room renovation & inflation fields
   roomLastRenovationYear?: number;
@@ -116,7 +151,15 @@ export interface ClassroomPackage {
 
   lastOverhaulDate: string; // Last full room upgrade date
   shelflifeYears: number; // Room overhaul cycle (e.g. 7 yrs)
-  projectedFiscalYear: string; // FY when whole room is refreshed
+  projectedFiscalYear: string; // FY when whole room is refreshed (Active target)
+  
+  // Decoupled Mechanical vs Planned FY for Classroom
+  mechanicalFiscalYear: string; // Baseline mechanical overhaul FY
+  targetFiscalYear: string; // Active scenario planned FY
+  isOverdue: boolean; // Overdue condition preserved regardless of deferral
+  deferralYears: number; // targetYear - mechanicalYear
+  planningPriority?: 'Critical' | 'Standard' | 'Elective';
+
   targetSeason: string; // e.g. "Summer Overhaul", "Winter Break", "Mid-Year"
   overallCondition: EquipmentCondition;
   hasCriticalFailure: boolean;
@@ -142,6 +185,11 @@ export interface FiscalYearBudget {
   wholeRoomCount?: number; // Number of classrooms scheduled for overhaul in this FY
   inflationDelta?: number; // Additional cost attributed to compounding inflation
   roomPackages?: ClassroomPackage[]; // Classroom packages scheduled for overhaul in this FY
+
+  // Budget Ceiling & Variance Fields
+  annualBudgetCeiling?: number;
+  ceilingVariance?: number; // ceiling - totalCost (positive = available headroom, negative = over cap)
+  isOverCeiling?: boolean;
 }
 
 export interface InventoryStats {
@@ -153,6 +201,10 @@ export interface InventoryStats {
   activeIssuesCount: number;
   outOfServiceCount: number;
   averageAgeYears: number;
+  // Scenario leveling stats
+  budgetCeiling?: number;
+  overCeilingYearsCount?: number;
+  deferredCount?: number;
 }
 
 export interface FilterState {
@@ -165,3 +217,4 @@ export interface FilterState {
   sortBy: 'room' | 'age' | 'cost' | 'installDate' | 'status';
   sortOrder: 'asc' | 'desc';
 }
+

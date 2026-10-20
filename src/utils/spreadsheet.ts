@@ -1,5 +1,12 @@
 import * as XLSX from 'xlsx';
-import { AVItem, ClassroomPackage, EquipmentCategory, EquipmentCondition, MaintenanceStatus } from '../types/inventory';
+import {
+  AVItem,
+  ClassroomPackage,
+  EquipmentCategory,
+  EquipmentCondition,
+  MaintenanceStatus,
+  PlanningScenario,
+} from '../types/inventory';
 import { enrichAVItem, getRoomReadinessExplanation, groupItemsIntoClassroomPackages } from './calculations';
 
 /**
@@ -687,9 +694,14 @@ export function downloadTemplateSpreadsheet(format: 'xlsx' | 'csv' = 'xlsx') {
 }
 
 /**
- * Exports current active items to Excel or CSV, ensuring room renovation & readiness fields are populated
+ * Exports current active items to Excel or CSV with dual-track physical baseline vs scenario planning columns
  */
-export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 'xlsx', customFilename?: string) {
+export function exportActiveInventory(
+  items: AVItem[],
+  format: 'xlsx' | 'csv' = 'xlsx',
+  customFilename?: string,
+  scenarioName?: string
+) {
   // Ensure classroom packages calculations have populated room-level metadata
   const packages = groupItemsIntoClassroomPackages(items);
   const pkgMap = new Map<string, (typeof packages)[0]>();
@@ -707,6 +719,7 @@ export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 
     const installYear = item.installYear || (item.installDate ? item.installDate.slice(0, 4) : '');
 
     return {
+      // 1. Hardware & Physical Reality
       'Building': item.building,
       'Room': item.room,
       'Room Name': item.roomName || pkg?.roomDisplayName || '',
@@ -716,14 +729,25 @@ export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 
       'Serial Number': item.serialNumber,
       'Install Year': installYear,
       'Install Date': item.installDate,
-      'Age (Years)': item.ageYears,
+      'Physical Age (Years)': item.ageYears,
       'Shelflife (Years)': item.shelflifeYears,
       'Remaining Life (Years)': item.remainingYears,
-      'Lifecycle Status': item.lifecycleStatus,
-      'Replacement Fiscal Year': item.replacementFiscalYear,
-      'Replacement Cost ($)': item.replacementCost,
+      'Physical Lifecycle Status': item.lifecycleStatus,
+      'Hardware Overdue': item.isOverdue ? 'Yes - Overdue' : 'No',
+      'Mechanical EOL Year': item.mechanicalEOLYear || '',
+      'Mechanical Fiscal Year': item.mechanicalFiscalYear || item.replacementFiscalYear,
+
+      // 2. Scenario & Financial Planning Overlay
+      'Active Scenario Branch': scenarioName || 'Baseline (Mechanical EOL)',
+      'Target Planned Fiscal Year': item.targetFiscalYear || item.replacementFiscalYear,
+      'Deferral Offset (Years)': item.deferralYears !== undefined ? item.deferralYears : 0,
+      'Deferral Risk Level': item.deferralRiskLevel || 'None',
+      'Planning Priority': item.planningPriority || 'Standard',
+
+      // 3. Costs & Room Metrics
+      'Replacement Hardware Cost ($)': item.replacementCost,
       'Installation Labor Cost ($)': item.installationLaborCost,
-      'Total Replacement Cost ($)': item.totalReplacementCost,
+      'Total Line-Item Cost ($)': item.totalReplacementCost,
       'Physical Condition': item.condition,
       'Maintenance Status': item.maintenanceStatus,
       'Active Issue': item.activeIssue || 'None',
@@ -731,7 +755,7 @@ export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 
       'Vendor': item.vendor || '',
       'Notes': item.notes || '',
       'Room Last Renovation Year': lastRenoYear,
-      'Room Total Installation Cost ($)': baselineCost,
+      'Room Baseline Cost ($)': baselineCost,
       'Inflation-Adjusted Overhaul Budget ($)': projectedCost,
       'Room Readiness Score (0-100)': readinessScore,
       'Room Readiness Rating': readinessRating,
@@ -744,6 +768,47 @@ export function exportActiveInventory(items: AVItem[], format: 'xlsx' | 'csv' = 
 
   const filename = customFilename || `College_AV_Inventory_Export_${new Date().toISOString().split('T')[0]}.${format}`;
   XLSX.writeFile(workbook, filename, { bookType: format });
+}
+
+/**
+ * Downloads a planning scenario as a portable JSON file
+ */
+export function exportScenarioJSON(scenario: PlanningScenario) {
+  const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(scenario, null, 2));
+  const downloadAnchor = document.createElement('a');
+  const sanitizedName = scenario.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const dateStr = new Date().toISOString().split('T')[0];
+  downloadAnchor.setAttribute('href', dataStr);
+  downloadAnchor.setAttribute('download', `Scenario_${sanitizedName}_${dateStr}.json`);
+  document.body.appendChild(downloadAnchor);
+  downloadAnchor.click();
+  downloadAnchor.remove();
+}
+
+/**
+ * Parses and validates an uploaded scenario JSON file
+ */
+export function importScenarioJSON(jsonContent: string): PlanningScenario {
+  try {
+    const parsed = JSON.parse(jsonContent);
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Invalid JSON structure');
+    }
+    return {
+      id: parsed.id || `scenario-${Date.now()}`,
+      name: parsed.name ? `${parsed.name} (Imported)` : 'Imported Scenario',
+      description: parsed.description || 'Imported planning branch',
+      isBaseline: false, // Imported scenarios are always editable branches
+      annualBudgetCeiling: Number(parsed.annualBudgetCeiling) || 250000,
+      inflationRate: Number(parsed.inflationRate) || 0.05,
+      itemOverrides: parsed.itemOverrides || {},
+      roomOverrides: parsed.roomOverrides || {},
+      createdAt: parsed.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (err: any) {
+    throw new Error('Failed to parse scenario JSON file: ' + err.message);
+  }
 }
 
 /**

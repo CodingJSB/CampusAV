@@ -1,4 +1,14 @@
-import { AVItem, ClassroomPackage, FiscalYearBudget, InventoryStats, LifecycleStatus, BudgetPlanningMode } from '../types/inventory';
+import {
+  AVItem,
+  ClassroomPackage,
+  FiscalYearBudget,
+  InventoryStats,
+  LifecycleStatus,
+  BudgetPlanningMode,
+  PlanningScenario,
+  ItemPlanningOverride,
+  RoomPlanningOverride,
+} from '../types/inventory';
 
 // Reference date for calculations (defaults to current date, or fallback to current simulation time)
 export const SYSTEM_NOW = new Date();
@@ -71,7 +81,7 @@ export function calculateAgeInYears(installDateStr?: string | number, refDate: D
  * Computes all dynamic fields for an AV item
  */
 export function enrichAVItem(
-  item: Omit<AVItem, 'ageYears' | 'remainingYears' | 'replacementFiscalYear' | 'lifecycleStatus' | 'totalReplacementCost'>,
+  item: Omit<AVItem, 'ageYears' | 'remainingYears' | 'replacementFiscalYear' | 'lifecycleStatus' | 'totalReplacementCost' | 'mechanicalEOLYear' | 'mechanicalFiscalYear' | 'targetFiscalYear' | 'isOverdue' | 'deferralYears' | 'deferralRiskLevel'> & Partial<AVItem>,
   refDate: Date = SYSTEM_NOW
 ): AVItem {
   // Normalize installYear and installDate
@@ -82,6 +92,7 @@ export function enrichAVItem(
   const ageYears = calculateAgeInYears(installDate, refDate);
   const remainingYears = Math.round((item.shelflifeYears - ageYears) * 10) / 10;
   
+  // Physical hardware lifecycle status - STRICTLY independent of financial planning year
   let lifecycleStatus: LifecycleStatus = 'Mid-Lifecycle';
   if (remainingYears <= 0) {
     lifecycleStatus = 'Past Lifespan / Overdue';
@@ -91,14 +102,42 @@ export function enrichAVItem(
     lifecycleStatus = 'Optimal';
   }
 
-  // Calculate projected replacement date: installYear + shelflifeYears
-  const replacementYear = installYear + (item.shelflifeYears || 6);
-  const replacementDate = new Date(replacementYear, 6, 1);
-
-  // If already overdue, it is budgeted for the current fiscal year
+  // 1. Mechanical EOL: installYear + shelflifeYears
+  const mechanicalEOLYear = installYear + (item.shelflifeYears || 6);
+  const mechanicalDate = new Date(mechanicalEOLYear, 6, 1);
+  const calculatedFY = getFiscalYearFromDate(mechanicalDate);
   const currentFY = getFiscalYearFromDate(refDate);
-  const calculatedFY = getFiscalYearFromDate(replacementDate);
-  const replacementFiscalYear = remainingYears <= 0 ? currentFY : calculatedFY;
+
+  const isOverdue = remainingYears <= 0 || mechanicalEOLYear <= refDate.getFullYear();
+  const mechanicalFiscalYear = isOverdue ? `${calculatedFY} (Overdue)` : calculatedFY;
+
+  // 2. Financial Target Fiscal Year: defaults to item.targetFiscalYear or replacementFiscalYear or mechanical
+  let targetFiscalYear = item.targetFiscalYear || item.replacementFiscalYear;
+  if (!targetFiscalYear) {
+    targetFiscalYear = isOverdue ? currentFY : calculatedFY;
+  }
+  // Ensure targetFiscalYear does not contain "(Overdue)" suffix when scheduling into future financial buckets
+  targetFiscalYear = targetFiscalYear.replace(/\s*\(Overdue\)/i, '').trim();
+
+  // Active replacement fiscal year reflects the scheduled financial year
+  const replacementFiscalYear = targetFiscalYear;
+
+  // 3. Deferral Calculation
+  const targetYearNum = parseInt(targetFiscalYear.replace('FY', ''), 10) || mechanicalEOLYear;
+  const deferralYears = Math.max(-5, targetYearNum - mechanicalEOLYear);
+
+  let deferralRiskLevel: 'None' | 'Moderate' | 'High' | 'Severe' = 'None';
+  if (isOverdue) {
+    if (deferralYears >= 2 || item.maintenanceStatus === 'Out of Service' || item.issueSeverity === 'Critical') {
+      deferralRiskLevel = 'Severe';
+    } else if (deferralYears > 0) {
+      deferralRiskLevel = 'High';
+    } else {
+      deferralRiskLevel = 'Moderate';
+    }
+  } else if (deferralYears >= 2) {
+    deferralRiskLevel = 'Moderate';
+  }
 
   const totalReplacementCost = Number(item.replacementCost || 0) + Number(item.installationLaborCost || 0);
 
@@ -109,6 +148,12 @@ export function enrichAVItem(
     ageYears,
     remainingYears,
     replacementFiscalYear,
+    targetFiscalYear,
+    mechanicalEOLYear,
+    mechanicalFiscalYear,
+    isOverdue,
+    deferralYears,
+    deferralRiskLevel,
     lifecycleStatus,
     totalReplacementCost,
   };
@@ -337,7 +382,8 @@ export function calculateFiscalYearBudgets(
   items: AVItem[],
   baseYear?: number,
   planningMode: BudgetPlanningMode = 'whole_room',
-  classroomPackages?: ClassroomPackage[]
+  classroomPackages?: ClassroomPackage[],
+  annualBudgetCeiling?: number
 ): FiscalYearBudget[] {
   const currentFY = getFiscalYearFromDate(SYSTEM_NOW);
   const currentYearNum = baseYear || parseInt(currentFY.replace('FY', ''), 10) || 2026;
@@ -383,6 +429,9 @@ export function calculateFiscalYearBudgets(
       wholeRoomCount: 0,
       inflationDelta: 0,
       roomPackages: [],
+      annualBudgetCeiling,
+      ceilingVariance: annualBudgetCeiling ? annualBudgetCeiling : undefined,
+      isOverCeiling: false,
     };
   });
 
@@ -411,6 +460,9 @@ export function calculateFiscalYearBudgets(
           wholeRoomCount: 0,
           inflationDelta: 0,
           roomPackages: [],
+          annualBudgetCeiling,
+          ceilingVariance: annualBudgetCeiling ? annualBudgetCeiling : undefined,
+          isOverCeiling: false,
         };
         if (!fiscalYears.includes(fy)) fiscalYears.push(fy);
       }
@@ -476,6 +528,9 @@ export function calculateFiscalYearBudgets(
           wholeRoomCount: 0,
           inflationDelta: 0,
           roomPackages: [],
+          annualBudgetCeiling,
+          ceilingVariance: annualBudgetCeiling ? annualBudgetCeiling : undefined,
+          isOverCeiling: false,
         };
         if (!fiscalYears.includes(fy)) {
           fiscalYears.push(fy);
@@ -491,6 +546,15 @@ export function calculateFiscalYearBudgets(
       b.categories[item.category] = (b.categories[item.category] || 0) + item.totalReplacementCost;
     });
   }
+
+  // Calculate variances against annualBudgetCeiling
+  Object.values(budgetMap).forEach((b) => {
+    if (annualBudgetCeiling !== undefined && annualBudgetCeiling > 0) {
+      b.annualBudgetCeiling = annualBudgetCeiling;
+      b.ceilingVariance = annualBudgetCeiling - b.totalCost;
+      b.isOverCeiling = b.totalCost > annualBudgetCeiling;
+    }
+  });
 
   // Sort strictly in ascending chronological order
   fiscalYears.sort((a, b) => parseInt(a.replace('FY', ''), 10) - parseInt(b.replace('FY', ''), 10));
@@ -673,12 +737,6 @@ export function groupItemsIntoClassroomPackages(
     const lastRenovationCost = explicitCost || getStandardRoomBaselineCost(spaceType);
 
     // 2. Compounding Inflation Forecasting: (1 + inflationRate)^years from CURRENT YEAR (2026)
-    // The baseline room cost ($35,000 for standard room, $55,000 lab, $90,000 lecture hall, or custom baseline)
-    // is set in current year dollars (2026).
-    // The 5% annual inflation is factored in based on this current year (2026), NOT based on the year it was installed.
-    // E.g., for 2026: deltaYears = 0 => $35,000 * 1.05^0 = $35,000
-    // E.g., for 2027: deltaYears = 1 => $35,000 * 1.05^1 = $36,750
-    // E.g., for 2028: deltaYears = 2 => $35,000 * 1.05^2 = $38,588
     const baseYear = (refDate || SYSTEM_NOW).getFullYear() || 2026;
     const projectedFYNum = parseInt(projectedFiscalYear.replace('FY', ''), 10) || baseYear;
     const deltaYears = Math.max(0, projectedFYNum - baseYear);
@@ -688,6 +746,13 @@ export function groupItemsIntoClassroomPackages(
 
     // 3. Room Equipment Agedness & Readiness Composite Index (0–100)
     const readiness = calculateRoomReadinessScore(roomItems);
+
+    // Decoupled mechanical vs target fiscal years for classroom package
+    const mechanicalFiscalYear = anchorItem?.mechanicalFiscalYear || anchorItem?.replacementFiscalYear || getFiscalYearFromDate(SYSTEM_NOW);
+    const targetFiscalYear = anchorItem?.targetFiscalYear || anchorItem?.replacementFiscalYear || projectedFiscalYear;
+    const isOverdue = anchorItem?.isOverdue || roomItems.some((it) => it.isOverdue);
+    const deferralYears = anchorItem?.deferralYears || 0;
+    const planningPriority = anchorItem?.planningPriority || roomItems.find((it) => it.planningPriority)?.planningPriority || 'Standard';
 
     // Populate calculated fields back onto room items for reporting & CSV export
     roomItems.forEach((it) => {
@@ -724,6 +789,11 @@ export function groupItemsIntoClassroomPackages(
       lastOverhaulDate,
       shelflifeYears,
       projectedFiscalYear,
+      mechanicalFiscalYear,
+      targetFiscalYear,
+      isOverdue,
+      deferralYears,
+      planningPriority,
       targetSeason,
       overallCondition,
       hasCriticalFailure,
@@ -735,4 +805,228 @@ export function groupItemsIntoClassroomPackages(
 
   return packages.sort((a, b) => b.totalPackageCost - a.totalPackageCost);
 }
+
+/**
+ * Creates the default immutable Mechanical Baseline scenario
+ */
+export function createDefaultBaselineScenario(): PlanningScenario {
+  return {
+    id: 'baseline',
+    name: 'Baseline (Mechanical EOL)',
+    description: 'Hardware lifecycle reality based strictly on physical installation dates and predetermined equipment shelf-life.',
+    isBaseline: true,
+    annualBudgetCeiling: 250000,
+    inflationRate: 0.05,
+    itemOverrides: {},
+    roomOverrides: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Merges immutable master items with scenario planning overrides without mutating master data
+ */
+export function resolveScenarioItems(
+  masterItems: AVItem[],
+  scenario: PlanningScenario,
+  refDate: Date = SYSTEM_NOW
+): AVItem[] {
+  if (
+    scenario.isBaseline ||
+    (!Object.keys(scenario.itemOverrides).length && !Object.keys(scenario.roomOverrides).length)
+  ) {
+    return masterItems;
+  }
+
+  return masterItems.map((masterItem) => {
+    const roomKey = `${masterItem.building}::${masterItem.room}`;
+    const roomOverride = scenario.roomOverrides[roomKey];
+    const itemOverride = scenario.itemOverrides[masterItem.id];
+
+    if (!roomOverride && !itemOverride) {
+      return masterItem;
+    }
+
+    const targetFiscalYear =
+      itemOverride?.targetFiscalYear || roomOverride?.targetFiscalYear || masterItem.targetFiscalYear;
+    const roomBaselineCost =
+      roomOverride?.customBaselineCost !== undefined
+        ? roomOverride.customBaselineCost
+        : masterItem.roomBaselineCost;
+    const planningPriority = itemOverride?.priority || roomOverride?.priority || masterItem.planningPriority;
+
+    return enrichAVItem(
+      {
+        ...masterItem,
+        targetFiscalYear,
+        roomBaselineCost,
+        planningPriority,
+      },
+      refDate
+    );
+  });
+}
+
+export interface LevelingMove {
+  building: string;
+  room: string;
+  roomDisplayName: string;
+  fromFY: string;
+  toFY: string;
+  cost: number;
+  readinessScore: number;
+  readinessRating: string;
+  reason: string;
+  hasCriticalFailure: boolean;
+}
+
+export interface LevelingProposal {
+  proposedMoves: LevelingMove[];
+  proposedRoomOverrides: Record<string, RoomPlanningOverride>;
+  initialOverCeilingCount: number;
+  remainingOverCeilingCount: number;
+}
+
+/**
+ * 1-Click Automated Budget Leveling / Triage Engine:
+ * Analyzes scheduled project costs across fiscal years against the annualBudgetCeiling.
+ * Deferral candidates are prioritized by high readiness scores (healthy rooms deferred first),
+ * while protecting critical failures and high-risk rooms from being pushed back.
+ */
+export function generateLevelingProposal(
+  packages: ClassroomPackage[],
+  annualBudgetCeiling: number,
+  baseYear: number = 2026,
+  horizonYears: number = 6
+): LevelingProposal {
+  const pkgCopies = packages.map((p) => ({
+    ...p,
+    currentScheduledFY: p.projectedFiscalYear,
+  }));
+
+  const horizonFYs: string[] = [];
+  for (let i = 0; i < horizonYears; i++) {
+    horizonFYs.push(`FY${baseYear + i}`);
+  }
+
+  const getYearSpend = () => {
+    const map: Record<string, number> = {};
+    horizonFYs.forEach((fy) => (map[fy] = 0));
+    pkgCopies.forEach((pkg) => {
+      const fy = pkg.currentScheduledFY;
+      map[fy] = (map[fy] || 0) + pkg.projectedOverhaulCost;
+    });
+    return map;
+  };
+
+  const proposedMoves: LevelingMove[] = [];
+  const proposedRoomOverrides: Record<string, RoomPlanningOverride> = {};
+
+  let currentSpend = getYearSpend();
+  const initialOverCeilingCount = horizonFYs.filter((fy) => (currentSpend[fy] || 0) > annualBudgetCeiling).length;
+
+  for (let yIdx = 0; yIdx < horizonFYs.length - 1; yIdx++) {
+    const currentFY = horizonFYs[yIdx];
+    let spend = currentSpend[currentFY] || 0;
+
+    if (spend <= annualBudgetCeiling) continue;
+
+    const candidatesInYear = pkgCopies.filter((p) => p.currentScheduledFY === currentFY);
+
+    // Filter out rooms that cannot be deferred:
+    // Protect rooms with critical hardware failures, severe conditions (score < 40), or 'Critical' priority
+    const deferrableRooms = candidatesInYear.filter(
+      (p) => !p.hasCriticalFailure && p.readinessScore >= 40 && p.planningPriority !== 'Critical'
+    );
+
+    // Sort deferrable candidates by readiness score DESCENDING (healthiest rooms with highest readiness deferred first!)
+    deferrableRooms.sort((a, b) => b.readinessScore - a.readinessScore);
+
+    for (const roomPkg of deferrableRooms) {
+      if ((currentSpend[currentFY] || 0) <= annualBudgetCeiling) {
+        break;
+      }
+
+      // Search for subsequent FY with headroom below ceiling
+      let targetFY: string | null = null;
+      for (let nextIdx = yIdx + 1; nextIdx < horizonFYs.length; nextIdx++) {
+        const candidateFY = horizonFYs[nextIdx];
+        const nextSpend = currentSpend[candidateFY] || 0;
+        if (nextSpend + roomPkg.projectedOverhaulCost <= annualBudgetCeiling * 1.05) {
+          targetFY = candidateFY;
+          break;
+        }
+      }
+
+      if (!targetFY) {
+        const sortedSubsequent = horizonFYs
+          .slice(yIdx + 1)
+          .sort((a, b) => (currentSpend[a] || 0) - (currentSpend[b] || 0));
+        targetFY = sortedSubsequent[0];
+      }
+
+      if (targetFY && targetFY !== currentFY) {
+        const cost = roomPkg.projectedOverhaulCost;
+        const fromFY = currentFY;
+        roomPkg.currentScheduledFY = targetFY;
+
+        currentSpend[fromFY] = (currentSpend[fromFY] || 0) - cost;
+        currentSpend[targetFY] = (currentSpend[targetFY] || 0) + cost;
+
+        const reason = `Optimal readiness (${roomPkg.readinessScore}/100, ${roomPkg.readinessRating}) allows safe deferral to ${targetFY} to relieve ${fromFY} budget spike ($${Math.round(cost / 1000)}k)`;
+
+        proposedMoves.push({
+          building: roomPkg.building,
+          room: roomPkg.roomName,
+          roomDisplayName: roomPkg.roomDisplayName,
+          fromFY,
+          toFY: targetFY,
+          cost,
+          readinessScore: roomPkg.readinessScore,
+          readinessRating: roomPkg.readinessRating,
+          reason,
+          hasCriticalFailure: roomPkg.hasCriticalFailure,
+        });
+
+        const roomKey = `${roomPkg.building}::${roomPkg.roomName}`;
+        proposedRoomOverrides[roomKey] = {
+          targetFiscalYear: targetFY,
+          notes: `Auto-leveled from ${fromFY} to ${targetFY} (Readiness ${roomPkg.readinessScore}/100)`,
+        };
+      }
+    }
+  }
+
+  const finalSpend = getYearSpend();
+  const remainingOverCeilingCount = horizonFYs.filter((fy) => (finalSpend[fy] || 0) > annualBudgetCeiling).length;
+
+  return {
+    proposedMoves,
+    proposedRoomOverrides,
+    initialOverCeilingCount,
+    remainingOverCeilingCount,
+  };
+}
+
+/**
+ * Creates a preset 5-Year Levelized Scenario
+ */
+export function createLevelizedScenarioPreset(masterItems: AVItem[]): PlanningScenario {
+  const pkgs = groupItemsIntoClassroomPackages(masterItems);
+  const proposal = generateLevelingProposal(pkgs, 250000);
+  return {
+    id: 'levelized-5yr',
+    name: '5-Year Levelized CapEx Plan',
+    description: 'Balanced capital distribution smoothing overdue backlog and high-spend spikes beneath $250k annual ceiling.',
+    isBaseline: false,
+    annualBudgetCeiling: 250000,
+    inflationRate: 0.05,
+    itemOverrides: {},
+    roomOverrides: proposal.proposedRoomOverrides,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 

@@ -7,12 +7,18 @@ interface InventoryTableProps {
   items: AVItem[];
   onSelectItem: (item: AVItem) => void;
   selectedFY?: string | null;
+  selectedItemIds?: string[];
+  onToggleSelectItem?: (id: string) => void;
+  onToggleSelectAll?: (filteredIds: string[]) => void;
 }
 
 export const InventoryTable: React.FC<InventoryTableProps> = ({
   items,
   onSelectItem,
   selectedFY,
+  selectedItemIds = [],
+  onToggleSelectItem,
+  onToggleSelectAll,
 }) => {
   const [search, setSearch] = useState('');
   const [selectedBuilding, setSelectedBuilding] = useState('all');
@@ -188,6 +194,22 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
         <table className="w-full text-left text-xs border-collapse">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 font-semibold uppercase text-[11px] tracking-wider select-none">
+              <th className="py-2.5 px-3 w-10 text-center">
+                <input
+                  type="checkbox"
+                  checked={
+                    sortedItems.length > 0 &&
+                    sortedItems.every((it) => (selectedItemIds || []).includes(it.id))
+                  }
+                  onChange={() => {
+                    if (onToggleSelectAll) {
+                      onToggleSelectAll(sortedItems.map((i) => i.id));
+                    }
+                  }}
+                  className="rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                  title="Select / deselect all filtered items"
+                />
+              </th>
               <th
                 onClick={() => handleSort('room')}
                 className="py-2.5 px-4 cursor-pointer hover:bg-slate-100 transition-colors"
@@ -217,7 +239,7 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
                   <ArrowUpDown className="w-3 h-3 text-slate-400" />
                 </div>
               </th>
-              <th className="py-2.5 px-4">Target FY</th>
+              <th className="py-2.5 px-4">Target FY (Planned)</th>
               <th
                 onClick={() => handleSort('cost')}
                 className="py-2.5 px-4 text-right cursor-pointer hover:bg-slate-100 transition-colors"
@@ -232,7 +254,7 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
           <tbody className="divide-y divide-slate-100">
             {sortedItems.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
+                <td colSpan={8} className="py-8 text-center text-slate-400 text-xs">
                   No classroom AV assets match your active filters.
                 </td>
               </tr>
@@ -240,14 +262,34 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
               sortedItems.map((item) => {
                 const isOverdue = item.lifecycleStatus === 'Past Lifespan / Overdue';
                 const isFailing = item.maintenanceStatus === 'Out of Service';
+                const isSelected = (selectedItemIds || []).includes(item.id);
+                const deferral = item.deferralYears || 0;
 
                 return (
                   <tr
                     key={item.id}
-                    onClick={() => onSelectItem(item)}
-                    className="hover:bg-slate-50 cursor-pointer transition-colors group"
+                    className={`cursor-pointer transition-colors group ${
+                      isSelected ? 'bg-sky-50/70 hover:bg-sky-100/60' : 'hover:bg-slate-50'
+                    }`}
                   >
-                    <td className="py-2.5 px-4 font-medium text-slate-900">
+                    <td
+                      className="py-2.5 px-3 text-center"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onToggleSelectItem) onToggleSelectItem(item.id);
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {}}
+                        className="rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                      />
+                    </td>
+                    <td
+                      onClick={() => onSelectItem(item)}
+                      className="py-2.5 px-4 font-medium text-slate-900"
+                    >
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold">{item.room}</span>
                         {item.roomName && (
@@ -270,22 +312,23 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
                         )}
                       </div>
                     </td>
-                    <td className="py-2.5 px-4 text-slate-800">
+                    <td onClick={() => onSelectItem(item)} className="py-2.5 px-4 text-slate-800">
                       <div className="font-medium group-hover:text-sky-600 transition-colors">
                         {item.makeModel}
                       </div>
                       <div className="text-[10px] font-mono text-slate-400">{item.serialNumber}</div>
                     </td>
-                    <td className="py-2.5 px-4 text-slate-600">
+                    <td onClick={() => onSelectItem(item)} className="py-2.5 px-4 text-slate-600">
                       {item.category}
                     </td>
-                    <td className="py-2.5 px-4 font-mono tabular-nums text-slate-700">
-                      {item.ageYears} yrs / {item.shelflifeYears} yrs
+                    <td onClick={() => onSelectItem(item)} className="py-2.5 px-4 font-mono tabular-nums text-slate-700">
+                      <div>{item.ageYears} yrs / {item.shelflifeYears} yrs</div>
+                      <div className="text-[10px] text-slate-400">Install: {item.installYear || '2022'}</div>
                     </td>
-                    <td className="py-2.5 px-4">
+                    <td onClick={() => onSelectItem(item)} className="py-2.5 px-4">
                       {isOverdue ? (
                         <div className="text-rose-700 font-semibold flex items-center gap-1">
-                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-600" />
                           <span>Overdue Replacement</span>
                         </div>
                       ) : item.lifecycleStatus === 'Nearing End of Life' ? (
@@ -301,10 +344,19 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
                         {item.maintenanceStatus} · {item.condition}
                       </div>
                     </td>
-                    <td className="py-2.5 px-4 font-mono tabular-nums font-semibold text-slate-800">
-                      {item.replacementFiscalYear}
+                    <td onClick={() => onSelectItem(item)} className="py-2.5 px-4 font-mono tabular-nums">
+                      <div className="font-semibold text-slate-900">{item.replacementFiscalYear}</div>
+                      {deferral > 0 ? (
+                        <span className="text-[10px] text-amber-700 bg-amber-50 px-1 py-0.2 rounded font-sans border border-amber-200">
+                          +{deferral}yr deferred
+                        </span>
+                      ) : item.mechanicalFiscalYear !== item.replacementFiscalYear ? (
+                        <span className="text-[10px] text-slate-400 font-sans">
+                          (mech: {item.mechanicalFiscalYear})
+                        </span>
+                      ) : null}
                     </td>
-                    <td className="py-2.5 px-4 text-right font-mono tabular-nums font-semibold text-slate-900">
+                    <td onClick={() => onSelectItem(item)} className="py-2.5 px-4 text-right font-mono tabular-nums font-semibold text-slate-900">
                       ${item.totalReplacementCost.toLocaleString()}
                     </td>
                   </tr>
