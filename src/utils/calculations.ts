@@ -86,11 +86,16 @@ export function enrichAVItem(
 ): AVItem {
   // Normalize installYear and installDate
   const rawInstallYear = item.installYear || (item.installDate && /^(19|20)\d{2}/.test(String(item.installDate)) ? parseInt(String(item.installDate).slice(0, 4), 10) : 2022);
-  const installYear = isNaN(Number(rawInstallYear)) ? 2022 : Number(rawInstallYear);
+  const parsedInstallYear = Number(rawInstallYear);
+  const installYear = (!isNaN(parsedInstallYear) && parsedInstallYear >= 1990 && parsedInstallYear <= 2040) ? parsedInstallYear : 2022;
   const installDate = item.installDate && String(item.installDate).length > 4 ? String(item.installDate) : `${installYear}-07-01`;
 
+  // Shelflife strictly bounded between 1 and 25 years
+  const rawShelflife = Number(item.shelflifeYears);
+  const shelflifeYears = (!isNaN(rawShelflife) && rawShelflife >= 1 && rawShelflife <= 25) ? Math.round(rawShelflife) : 6;
+
   const ageYears = calculateAgeInYears(installDate, refDate);
-  const remainingYears = Math.round((item.shelflifeYears - ageYears) * 10) / 10;
+  const remainingYears = Math.round((shelflifeYears - ageYears) * 10) / 10;
   
   // Physical hardware lifecycle status - STRICTLY independent of financial planning year
   let lifecycleStatus: LifecycleStatus = 'Mid-Lifecycle';
@@ -102,8 +107,8 @@ export function enrichAVItem(
     lifecycleStatus = 'Optimal';
   }
 
-  // 1. Mechanical EOL: installYear + shelflifeYears
-  const mechanicalEOLYear = installYear + (item.shelflifeYears || 6);
+  // 1. Mechanical EOL: installYear + shelflifeYears (bounded to realistic calendar range)
+  const mechanicalEOLYear = Math.min(2045, Math.max(1995, installYear + shelflifeYears));
   const mechanicalDate = new Date(mechanicalEOLYear, 6, 1);
   const calculatedFY = getFiscalYearFromDate(mechanicalDate);
   const currentFY = getFiscalYearFromDate(refDate);
@@ -119,12 +124,23 @@ export function enrichAVItem(
   // Ensure targetFiscalYear does not contain "(Overdue)" suffix when scheduling into future financial buckets
   targetFiscalYear = targetFiscalYear.replace(/\s*\(Overdue\)/i, '').trim();
 
+  // Validate that targetFiscalYear is a realistic academic fiscal year (e.g. FY2020 - FY2045)
+  const targetYearMatch = targetFiscalYear.match(/FY(\d{4})/i);
+  if (targetYearMatch) {
+    const yVal = parseInt(targetYearMatch[1], 10);
+    if (yVal > 2045 || yVal < 2020) {
+      targetFiscalYear = isOverdue ? currentFY : calculatedFY;
+    }
+  } else if (!/^FY\d{4}$/.test(targetFiscalYear)) {
+    targetFiscalYear = isOverdue ? currentFY : calculatedFY;
+  }
+
   // Active replacement fiscal year reflects the scheduled financial year
   const replacementFiscalYear = targetFiscalYear;
 
   // 3. Deferral Calculation
-  const targetYearNum = parseInt(targetFiscalYear.replace('FY', ''), 10) || mechanicalEOLYear;
-  const deferralYears = Math.max(-5, targetYearNum - mechanicalEOLYear);
+  const targetYearNum = parseInt(targetFiscalYear.replace(/[^0-9]/g, ''), 10) || mechanicalEOLYear;
+  const deferralYears = Math.max(-5, Math.min(15, targetYearNum - mechanicalEOLYear));
 
   let deferralRiskLevel: 'None' | 'Moderate' | 'High' | 'Severe' = 'None';
   if (isOverdue) {
@@ -388,12 +404,12 @@ export function calculateFiscalYearBudgets(
   const currentFY = getFiscalYearFromDate(SYSTEM_NOW);
   const currentYearNum = baseYear || parseInt(currentFY.replace('FY', ''), 10) || 2026;
 
-  // Determine maximum projected year across all items and packages
+  // Determine maximum projected year across all items and packages, capped to currentYearNum + 15
   let maxYearNum = currentYearNum + 5;
   items.forEach((item) => {
     if (item.replacementFiscalYear) {
-      const parsedYear = parseInt(item.replacementFiscalYear.replace('FY', ''), 10);
-      if (!isNaN(parsedYear) && parsedYear > maxYearNum) {
+      const parsedYear = parseInt(item.replacementFiscalYear.replace(/[^0-9]/g, ''), 10);
+      if (!isNaN(parsedYear) && parsedYear > maxYearNum && parsedYear <= currentYearNum + 15) {
         maxYearNum = parsedYear;
       }
     }
@@ -401,12 +417,15 @@ export function calculateFiscalYearBudgets(
 
   if (classroomPackages) {
     classroomPackages.forEach((pkg) => {
-      const parsedYear = parseInt(pkg.projectedFiscalYear.replace('FY', ''), 10);
-      if (!isNaN(parsedYear) && parsedYear > maxYearNum) {
+      const parsedYear = parseInt(pkg.projectedFiscalYear.replace(/[^0-9]/g, ''), 10);
+      if (!isNaN(parsedYear) && parsedYear > maxYearNum && parsedYear <= currentYearNum + 15) {
         maxYearNum = parsedYear;
       }
     });
   }
+
+  // Cap maxYearNum to at most 15 years in advance to protect against runaway allocation loops
+  maxYearNum = Math.min(currentYearNum + 15, Math.max(currentYearNum + 5, maxYearNum));
 
   // Generate continuous chronological fiscal years from current year to max projected year
   const fiscalYears: string[] = [];
@@ -737,19 +756,25 @@ export function groupItemsIntoClassroomPackages(
     const lastRenovationCost = explicitCost || getStandardRoomBaselineCost(spaceType);
 
     // 2. Compounding Inflation Forecasting: (1 + inflationRate)^years from CURRENT YEAR (2026)
+    // Strictly bounds deltaYears to at most 15 years to prevent runaway exponential inflation
     const baseYear = (refDate || SYSTEM_NOW).getFullYear() || 2026;
-    const projectedFYNum = parseInt(projectedFiscalYear.replace('FY', ''), 10) || baseYear;
-    const deltaYears = Math.max(0, projectedFYNum - baseYear);
+    const rawTargetYear = parseInt(projectedFiscalYear.replace(/[^0-9]/g, ''), 10);
+    const isValidTargetYear = !isNaN(rawTargetYear) && rawTargetYear >= baseYear - 5 && rawTargetYear <= baseYear + 15;
+    const projectedFYNum = isValidTargetYear ? rawTargetYear : baseYear;
+    const deltaYears = Math.min(15, Math.max(0, projectedFYNum - baseYear));
     const inflationFactor = Math.pow(1 + inflationRate, deltaYears);
     const projectedOverhaulCost = Math.round(lastRenovationCost * inflationFactor);
     const inflationDeltaCost = Math.max(0, projectedOverhaulCost - lastRenovationCost);
+
+    // Sanitize projectedFiscalYear if it was invalid or out of realistic range
+    const safeProjectedFiscalYear = isValidTargetYear ? projectedFiscalYear : getFiscalYearFromDate(SYSTEM_NOW);
 
     // 3. Room Equipment Agedness & Readiness Composite Index (0–100)
     const readiness = calculateRoomReadinessScore(roomItems);
 
     // Decoupled mechanical vs target fiscal years for classroom package
     const mechanicalFiscalYear = anchorItem?.mechanicalFiscalYear || anchorItem?.replacementFiscalYear || getFiscalYearFromDate(SYSTEM_NOW);
-    const targetFiscalYear = anchorItem?.targetFiscalYear || anchorItem?.replacementFiscalYear || projectedFiscalYear;
+    const targetFiscalYear = anchorItem?.targetFiscalYear || anchorItem?.replacementFiscalYear || safeProjectedFiscalYear;
     const isOverdue = anchorItem?.isOverdue || roomItems.some((it) => it.isOverdue);
     const deferralYears = anchorItem?.deferralYears || 0;
     const planningPriority = anchorItem?.planningPriority || roomItems.find((it) => it.planningPriority)?.planningPriority || 'Standard';
@@ -788,7 +813,7 @@ export function groupItemsIntoClassroomPackages(
       oldestComponentAgeYears: readiness.oldestAge,
       lastOverhaulDate,
       shelflifeYears,
-      projectedFiscalYear,
+      projectedFiscalYear: safeProjectedFiscalYear,
       mechanicalFiscalYear,
       targetFiscalYear,
       isOverdue,

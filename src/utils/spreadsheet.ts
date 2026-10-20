@@ -223,7 +223,7 @@ function normalizeDate(raw: any): string {
   // If Excel serial number date
   if (typeof raw === 'number') {
     const parsed = XLSX.SSF.parse_date_code(raw);
-    if (parsed) {
+    if (parsed && parsed.y >= 1990 && parsed.y <= 2040) {
       const y = parsed.y;
       const m = String(parsed.m).padStart(2, '0');
       const d = String(parsed.d).padStart(2, '0');
@@ -234,9 +234,12 @@ function normalizeDate(raw: any): string {
   const d = new Date(raw);
   if (!isNaN(d.getTime())) {
     const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    // Validate reasonable academic AV year bounds (1990 - 2040)
+    if (y >= 1990 && y <= 2040) {
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
   }
 
   return '2022-07-01';
@@ -332,6 +335,14 @@ export function detectSuggestedMapping(headers: string[]): ColumnMapping {
           if (cleanAlias === 'type' && (cleanedH.includes('space') || cleanedH.includes('room'))) {
             continue;
           }
+          // If checking for 'year', prevent matching future financial/planning targets or serial numbers
+          if (cleanAlias === 'year' && (cleanedH.includes('target') || cleanedH.includes('plan') || cleanedH.includes('fiscal') || cleanedH.includes('due') || cleanedH.includes('renov') || cleanedH.includes('overhaul'))) {
+            continue;
+          }
+          // If checking for 'date', prevent matching target dates
+          if (cleanAlias === 'date' && (cleanedH.includes('target') || cleanedH.includes('plan') || cleanedH.includes('due') || cleanedH.includes('renov'))) {
+            continue;
+          }
           return h;
         }
       }
@@ -349,7 +360,7 @@ export function detectSuggestedMapping(headers: string[]): ColumnMapping {
     serialNumber: findMatch('serialnumber', 'serial', 'sn', 'assettag', 'tag', 'barcode', 'id'),
     installDate: findMatch('installyear', 'installationyear', 'yearinstalled', 'installdate', 'dateinstalled', 'purchasedate', 'acquisitiondate', 'date', 'year'),
     installYear: findMatch('installyear', 'installationyear', 'yearinstalled', 'year', 'purchaseyear'),
-    shelflifeYears: findMatch('shelflifeyears', 'shelflife', 'lifespan', 'shelflifeyrs', 'expectedlife', 'cycle', 'useful life'),
+    shelflifeYears: findMatch('shelflifeyears', 'shelflife', 'lifespan', 'shelflifeyrs', 'expectedlife', 'usefullife', 'lifecycleyears'),
     replacementCost: findMatch('replacementcost', 'hardwarecost', 'cost', 'unitcost', 'price', 'estimate', 'budget'),
     installationLaborCost: findMatch('installationlaborcost', 'laborcost', 'installationcost', 'labor', 'services'),
     condition: findMatch('condition', 'state', 'health', 'quality'),
@@ -423,10 +434,19 @@ export function processRowsWithMapping(rawData: Record<string, any>[], mapping: 
     const category = resolveCategory(getVal(mapping.category), makeModel);
     const rawDate = getVal(mapping.installDate) || getVal(mapping.installYear);
     const installDate = normalizeDate(rawDate);
-    const installYear = getVal(mapping.installYear) || (installDate ? installDate.slice(0, 4) : 2025);
+    
+    // Validate install year strictly between 1990 and 2040
+    const rawYear = parseInt(String(getVal(mapping.installYear) || '').trim(), 10);
+    const dateDerivedYear = parseInt(installDate.slice(0, 4), 10);
+    const installYear = (!isNaN(rawYear) && rawYear >= 1990 && rawYear <= 2040)
+      ? rawYear
+      : (!isNaN(dateDerivedYear) && dateDerivedYear >= 1990 && dateDerivedYear <= 2040 ? dateDerivedYear : 2022);
 
-    const rawLifespan = getVal(mapping.shelflifeYears);
-    const shelflifeYears = Number(rawLifespan) > 0 ? Number(rawLifespan) : getDefaultLifespan(category);
+    // Validate shelf-life strictly between 1 and 25 years (prevents room numbers or lamp hours from corrupting lifespans)
+    const rawLifespan = Number(getVal(mapping.shelflifeYears));
+    const shelflifeYears = (!isNaN(rawLifespan) && rawLifespan >= 1 && rawLifespan <= 25)
+      ? Math.round(rawLifespan)
+      : getDefaultLifespan(category);
 
     // If replacement cost is empty or zero, apply category standard baseline estimate
     const rawCost = getVal(mapping.replacementCost);
@@ -539,9 +559,12 @@ export async function parseSpreadsheetFile(file: File): Promise<{
       ? parseInt(rawDate, 10)
       : parseInt(installDate.slice(0, 4), 10);
     
-    // Shelflife
-    const rawLifespan = findVal('shelflifeyears', 'shelflife', 'lifespan', 'shelflifeyrs', 'expectedlife', 'cycle');
-    const shelflifeYears = Number(rawLifespan) > 0 ? Number(rawLifespan) : getDefaultLifespan(category);
+    // Shelflife strictly bounded between 1 and 25 years
+    const rawLifespan = findVal('shelflifeyears', 'shelflife', 'lifespan', 'shelflifeyrs', 'expectedlife', 'usefullife');
+    const numLifespan = Number(rawLifespan);
+    const shelflifeYears = (!isNaN(numLifespan) && numLifespan >= 1 && numLifespan <= 25)
+      ? Math.round(numLifespan)
+      : getDefaultLifespan(category);
 
     // Costs
     const rawCost = findVal('replacementcost', 'hardwarecost', 'cost', 'unitcost', 'price', 'estimate');
