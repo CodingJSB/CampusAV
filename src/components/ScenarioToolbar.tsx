@@ -26,6 +26,9 @@ interface ScenarioToolbarProps {
   onImportScenario: (scenario: PlanningScenario) => void;
   onOpenAutoLeveler: () => void;
   overCeilingYearsCount: number;
+  onOpenCategoryLifespans?: () => void;
+  onOpenUsageUpload?: () => void;
+  hasUsageData?: boolean;
 }
 
 export const ScenarioToolbar: React.FC<ScenarioToolbarProps> = ({
@@ -38,6 +41,9 @@ export const ScenarioToolbar: React.FC<ScenarioToolbarProps> = ({
   onImportScenario,
   onOpenAutoLeveler,
   overCeilingYearsCount,
+  onOpenCategoryLifespans,
+  onOpenUsageUpload,
+  hasUsageData,
 }) => {
   const activeScenario = scenarios.find((s) => s.id === activeScenarioId) || scenarios[0];
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
@@ -187,6 +193,34 @@ export const ScenarioToolbar: React.FC<ScenarioToolbarProps> = ({
               <Check className="w-3.5 h-3.5 text-emerald-600" />
               <span>Budget Level</span>
             </div>
+          )}
+
+          {/* Category Lifespans Button */}
+          {onOpenCategoryLifespans && (
+            <button
+              onClick={onOpenCategoryLifespans}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-md font-medium transition-colors"
+              title="Configure category-specific lifespans (Screens: 10y, Switchers: 7y, etc.)"
+            >
+              <Sliders className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Category Lifespans</span>
+            </button>
+          )}
+
+          {/* Room Usage Ranking Upload & Status Button */}
+          {onOpenUsageUpload && (
+            <button
+              onClick={onOpenUsageUpload}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition-colors border ${
+                hasUsageData
+                  ? 'bg-purple-50 text-purple-900 border-purple-300 hover:bg-purple-100'
+                  : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+              }`}
+              title="Upload or manage room usage ranking overlay"
+            >
+              <span className={`w-2 h-2 rounded-full ${hasUsageData ? 'bg-purple-600' : 'bg-slate-400'}`} />
+              <span>Room Usage {hasUsageData ? '(Active)' : ''}</span>
+            </button>
           )}
 
           {/* 1-Click Auto Leveler Action */}

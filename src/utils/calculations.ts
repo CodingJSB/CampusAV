@@ -8,10 +8,112 @@ import {
   PlanningScenario,
   ItemPlanningOverride,
   RoomPlanningOverride,
+  CategoryLifespans,
+  RoomUsageData,
+  RoomUsageRanking,
+  RoomUsageTier,
 } from '../types/inventory';
 
 // Reference date for calculations (defaults to current date, or fallback to current simulation time)
 export const SYSTEM_NOW = new Date();
+
+/**
+ * Standard category-specific default shelf life benchmarks:
+ * - Screen: 10 years
+ * - Switcher, Controller, Processor: 7 years
+ * - Projectors: 7 years
+ * - Document Camera: 7 years
+ * - Camera and Ceiling Mics: 7 years
+ * - Commercial Flat Panels: 7 years
+ * - Wireless Presentation and other: 5 years
+ */
+export const DEFAULT_CATEGORY_LIFESPANS: CategoryLifespans = {
+  screen: 10,
+  switcherControllerProcessor: 7,
+  projectors: 7,
+  documentCamera: 7,
+  cameraCeilingMics: 7,
+  flatPanel: 7,
+  wirelessAndOther: 5,
+};
+
+/**
+ * Resolves the equipment category shelf life based on configurable category lifespans
+ */
+export function getCategoryLifespan(
+  category?: string,
+  overrides?: Partial<CategoryLifespans>
+): number {
+  const lifespans: CategoryLifespans = {
+    ...DEFAULT_CATEGORY_LIFESPANS,
+    ...overrides,
+  };
+  const s = String(category || '').toLowerCase();
+
+  // Screen: 10 years default
+  if (s.includes('screen') || s.includes('da-lite') || s.includes('draper')) {
+    return Math.max(1, Math.min(25, Number(lifespans.screen) || 10));
+  }
+
+  // Switcher, controller, processor (same category): 7 years default
+  if (
+    s.includes('switcher') ||
+    s.includes('controller') ||
+    s.includes('matrix') ||
+    s.includes('processor') ||
+    s.includes('touchpanel') ||
+    s.includes('keypad') ||
+    s.includes('mlc') ||
+    s.includes('tsw') ||
+    s.includes('dmps') ||
+    s.includes('nvx')
+  ) {
+    return Math.max(1, Math.min(25, Number(lifespans.switcherControllerProcessor) || 7));
+  }
+
+  // Projectors: 7 years default
+  if (s.includes('projector') || s.includes('proj') || s.includes('laser')) {
+    return Math.max(1, Math.min(25, Number(lifespans.projectors) || 7));
+  }
+
+  // Document Camera: 7 years default
+  if (s.includes('doc') || s.includes('document') || s.includes('elmo') || s.includes('wolfvision')) {
+    return Math.max(1, Math.min(25, Number(lifespans.documentCamera) || 7));
+  }
+
+  // Camera & Ceiling Mics: 7 years default
+  if (
+    s.includes('camera') ||
+    s.includes('mic') ||
+    s.includes('ptz') ||
+    s.includes('audio') ||
+    s.includes('vaddio') ||
+    s.includes('huddlecam') ||
+    s.includes('shure') ||
+    s.includes('tesira') ||
+    s.includes('soundbar') ||
+    s.includes('tv bar') ||
+    s.includes('video bar')
+  ) {
+    return Math.max(1, Math.min(25, Number(lifespans.cameraCeilingMics) || 7));
+  }
+
+  // Commercial Flat Panels / Displays: 7 years default
+  if (
+    s.includes('flat') ||
+    s.includes('panel') ||
+    s.includes('touch') ||
+    s.includes('smart') ||
+    s.includes('tv') ||
+    s.includes('display') ||
+    s.includes('monitor')
+  ) {
+    return Math.max(1, Math.min(25, Number(lifespans.flatPanel) || 7));
+  }
+
+  // Wireless Presentation and Other: 5 years default
+  return Math.max(1, Math.min(25, Number(lifespans.wirelessAndOther) || 5));
+}
 
 /**
  * Standard baseline turnkey renovation cost benchmarks by space type (Option B fallback).
@@ -82,17 +184,29 @@ export function calculateAgeInYears(installDateStr?: string | number, refDate: D
  */
 export function enrichAVItem(
   item: Omit<AVItem, 'ageYears' | 'remainingYears' | 'replacementFiscalYear' | 'lifecycleStatus' | 'totalReplacementCost' | 'mechanicalEOLYear' | 'mechanicalFiscalYear' | 'targetFiscalYear' | 'isOverdue' | 'deferralYears' | 'deferralRiskLevel'> & Partial<AVItem>,
-  refDate: Date = SYSTEM_NOW
+  refDateOrLifespans?: Date | Partial<CategoryLifespans>,
+  categoryLifespansParam?: Partial<CategoryLifespans>
 ): AVItem {
+  let refDate = SYSTEM_NOW;
+  let categoryLifespans = categoryLifespansParam;
+  if (refDateOrLifespans instanceof Date) {
+    refDate = refDateOrLifespans;
+  } else if (refDateOrLifespans && typeof refDateOrLifespans === 'object') {
+    categoryLifespans = refDateOrLifespans;
+  }
+
   // Normalize installYear and installDate
   const rawInstallYear = item.installYear || (item.installDate && /^(19|20)\d{2}/.test(String(item.installDate)) ? parseInt(String(item.installDate).slice(0, 4), 10) : 2022);
   const parsedInstallYear = Number(rawInstallYear);
   const installYear = (!isNaN(parsedInstallYear) && parsedInstallYear >= 1990 && parsedInstallYear <= 2040) ? parsedInstallYear : 2022;
   const installDate = item.installDate && String(item.installDate).length > 4 ? String(item.installDate) : `${installYear}-07-01`;
 
-  // Shelflife strictly bounded between 1 and 25 years
-  const rawShelflife = Number(item.shelflifeYears);
-  const shelflifeYears = (!isNaN(rawShelflife) && rawShelflife >= 1 && rawShelflife <= 25) ? Math.round(rawShelflife) : 6;
+  // Shelflife: Use category-specific default benchmark unless explicitly overridden on the item
+  const categoryDefault = getCategoryLifespan(item.category, categoryLifespans);
+  const rawShelflife = item.shelflifeYears !== undefined && Number(item.shelflifeYears) > 0 && Number(item.shelflifeYears) <= 25
+    ? Number(item.shelflifeYears)
+    : categoryDefault;
+  const shelflifeYears = (!isNaN(rawShelflife) && rawShelflife >= 1 && rawShelflife <= 25) ? Math.round(rawShelflife) : categoryDefault;
 
   const ageYears = calculateAgeInYears(installDate, refDate);
   const remainingYears = Math.round((shelflifeYears - ageYears) * 10) / 10;
@@ -376,6 +490,10 @@ export function getRoomReadinessExplanation(pkg: ClassroomPackage): RoomReadines
     }
   }
 
+  if (pkg.usageRank !== undefined) {
+    summary += ` • Campus Scheduling Impact: Ranked #${pkg.usageRank} in campus traffic (${pkg.usageTier}${pkg.usageHours ? ', ' + pkg.usageHours + ' hrs/wk' : ''}) elevates project urgency to ${pkg.urgencyRating} (Urgency Index: ${pkg.urgencyScore}/100).`;
+  }
+
   return {
     score,
     rating: pkg.readinessRating,
@@ -649,6 +767,89 @@ export function calculateInventoryStats(
 }
 
 /**
+ * Ultra-robust cross-referencing between a classroom package and an uploaded RoomUsageData dataset.
+ * Supports exact key, clean key, room code, numeric digits, friendly space names, and building substring matching.
+ */
+export function matchRoomToUsageRanking(
+  building: string,
+  roomName: string,
+  roomDisplayName?: string,
+  friendlyName?: string,
+  roomUsageData?: RoomUsageData | null
+): RoomUsageRanking | undefined {
+  if (!roomUsageData || !roomUsageData.rankings || roomUsageData.rankings.length === 0) {
+    return undefined;
+  }
+
+  const clean = (s: any) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const digitsOnly = (s: any) => String(s || '').replace(/\D/g, '');
+
+  const bClean = clean(building);
+  const rClean = clean(roomName);
+  const fClean = clean(friendlyName);
+  const dClean = clean(roomDisplayName);
+  const directKey = `${building}::${roomName}`;
+  const directKeyClean = clean(directKey);
+  const roomDigits = digitsOnly(roomName);
+
+  // 1. Direct map lookups
+  if (roomUsageData.roomRankMap) {
+    if (roomUsageData.roomRankMap[directKey]) return roomUsageData.roomRankMap[directKey];
+    if (roomUsageData.roomRankMap[directKeyClean]) return roomUsageData.roomRankMap[directKeyClean];
+    if (roomUsageData.roomRankMap[roomName]) return roomUsageData.roomRankMap[roomName];
+    if (roomUsageData.roomRankMap[rClean]) return roomUsageData.roomRankMap[rClean];
+    if (roomDigits && roomUsageData.roomRankMap[roomDigits]) return roomUsageData.roomRankMap[roomDigits];
+  }
+
+  // 2. Iterate through all rankings with multi-tiered fuzzy & normalized matching
+  for (const rankItem of roomUsageData.rankings) {
+    const itemRoomClean = clean(rankItem.room);
+    const itemBldgClean = clean(rankItem.building);
+    const itemDigits = digitsOnly(rankItem.room);
+    const itemNotesClean = clean(rankItem.notes);
+
+    // Exact clean room match (e.g. 'nh105' === 'nh105' or '105' === '105')
+    if (itemRoomClean === rClean) {
+      return rankItem;
+    }
+
+    // Direct building + room composite clean match
+    if (itemBldgClean && bClean) {
+      if (`${itemBldgClean}${itemRoomClean}` === `${bClean}${rClean}`) {
+        return rankItem;
+      }
+      // Partial building overlap (e.g. 'nobel' in 'nobelhall' or 'nobelhall' in 'nobel') + room match
+      if ((itemBldgClean.includes(bClean) || bClean.includes(itemBldgClean)) && (itemRoomClean === rClean || (roomDigits && itemDigits === roomDigits))) {
+        return rankItem;
+      }
+    }
+
+    // Number extraction match: e.g. 'NH-105' and '105', or 'Room 105' and 'NH-105'
+    if (roomDigits && itemDigits && roomDigits === itemDigits) {
+      // If building also has some overlap or if either building is omitted
+      if (!itemBldgClean || !bClean || itemBldgClean.includes(bClean) || bClean.includes(itemBldgClean) || bClean.startsWith(itemRoomClean.slice(0, 2))) {
+        return rankItem;
+      }
+    }
+
+    // Check if rankItem.room contains the roomName or vice versa (e.g. 'Nobel 105' contains '105')
+    if (rClean && itemRoomClean && (itemRoomClean.includes(rClean) || rClean.includes(itemRoomClean))) {
+      return rankItem;
+    }
+
+    // Check friendly room names (e.g. 'Ecology Lab' or 'Active Classroom')
+    if (fClean && (itemRoomClean === fClean || itemNotesClean === fClean || itemNotesClean.includes(fClean))) {
+      return rankItem;
+    }
+    if (dClean && (itemRoomClean === dClean || itemNotesClean === dClean || itemNotesClean.includes(dClean))) {
+      return rankItem;
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Groups individual AV equipment into whole-room integrated packages.
  * In college AV, rooms are typically overhauled as a complete bundled package,
  * with individual components swapped out early only if they fail prematurely.
@@ -656,8 +857,17 @@ export function calculateInventoryStats(
 export function groupItemsIntoClassroomPackages(
   items: AVItem[],
   inflationRate: number = 0.05,
-  refDate: Date = SYSTEM_NOW
+  refDateOrUsage?: Date | RoomUsageData | null,
+  roomUsageDataParam?: RoomUsageData | null
 ): ClassroomPackage[] {
+  let refDate = SYSTEM_NOW;
+  let roomUsageData = roomUsageDataParam;
+  if (refDateOrUsage instanceof Date) {
+    refDate = refDateOrUsage;
+  } else if (refDateOrUsage !== undefined) {
+    roomUsageData = refDateOrUsage;
+  }
+
   const roomMap: Record<string, AVItem[]> = {};
 
   items.forEach((item) => {
@@ -694,8 +904,8 @@ export function groupItemsIntoClassroomPackages(
       .sort();
     const lastOverhaulDate = sortedDates[0] || '2021-08-01';
 
-    // Room overhaul cycle (default 6 years for college classrooms)
-    const shelflifeYears = anchorItem?.shelflifeYears || 6;
+    // Room overhaul cycle (default 7 years for college classrooms)
+    const shelflifeYears = anchorItem?.shelflifeYears || 7;
 
     // Projected FY for the entire room overhaul
     const projectedFiscalYear = anchorItem?.replacementFiscalYear || getFiscalYearFromDate(SYSTEM_NOW);
@@ -772,6 +982,54 @@ export function groupItemsIntoClassroomPackages(
     // 3. Room Equipment Agedness & Readiness Composite Index (0–100)
     const readiness = calculateRoomReadinessScore(roomItems);
 
+    // 4. Cross-Reference Room Usage Ranking & Calculate Urgency/Impact Metrics
+    let usageRank: number | undefined = undefined;
+    let totalRankedRooms: number | undefined = undefined;
+    let usageTier: RoomUsageTier = 'Unranked';
+    let usageHours: number | undefined = undefined;
+    let utilizationRate: number | undefined = undefined;
+    let urgencyScore = Math.max(0, 100 - readiness.score); // Base urgency is hardware degradation (0-100)
+    let urgencyRating: 'Critical Urgency' | 'High Urgency' | 'Moderate Urgency' | 'Low Urgency' = 'Moderate Urgency';
+
+    const matched = roomUsageData ? matchRoomToUsageRanking(building, roomName, roomDisplayName, roomFriendlyName, roomUsageData) : undefined;
+
+    if (matched) {
+      totalRankedRooms = roomUsageData?.totalRooms || 1;
+      usageRank = matched.rank;
+      usageHours = matched.usageHours;
+      utilizationRate = matched.utilizationRate;
+
+      // Classify usage tier (Rank 1 is highest usage on campus)
+      const rankPercentile = totalRankedRooms > 1 ? (usageRank / totalRankedRooms) * 100 : 25;
+      if (usageRank <= 3 || rankPercentile <= 33) {
+        usageTier = 'High Usage';
+      } else if (rankPercentile <= 66) {
+        usageTier = 'Moderate Usage';
+      } else {
+        usageTier = 'Low Usage';
+      }
+
+      // Urgency Calculation: Combines hardware degradation with student utilization impact
+      // The higher the usage and the worse the hardware condition, the higher the urgency!
+      const hardwareDeficit = 100 - readiness.score;
+      const studentImpactWeight = Math.max(15, 105 - rankPercentile);
+      urgencyScore = Math.round((hardwareDeficit * 0.6) + (studentImpactWeight * 0.4));
+      
+      if (hasCriticalFailure || (usageTier === 'High Usage' && readiness.score < 60)) {
+        urgencyScore = Math.max(urgencyScore, 85);
+      }
+
+      if (urgencyScore >= 75 || hasCriticalFailure) urgencyRating = 'Critical Urgency';
+      else if (urgencyScore >= 55) urgencyRating = 'High Urgency';
+      else if (urgencyScore >= 35) urgencyRating = 'Moderate Urgency';
+      else urgencyRating = 'Low Urgency';
+    } else {
+      if (hasCriticalFailure || readiness.score < 40) urgencyRating = 'Critical Urgency';
+      else if (readiness.score < 60) urgencyRating = 'High Urgency';
+      else if (readiness.score < 80) urgencyRating = 'Moderate Urgency';
+      else urgencyRating = 'Low Urgency';
+    }
+
     // Decoupled mechanical vs target fiscal years for classroom package
     const mechanicalFiscalYear = anchorItem?.mechanicalFiscalYear || anchorItem?.replacementFiscalYear || getFiscalYearFromDate(SYSTEM_NOW);
     const targetFiscalYear = anchorItem?.targetFiscalYear || anchorItem?.replacementFiscalYear || safeProjectedFiscalYear;
@@ -825,6 +1083,14 @@ export function groupItemsIntoClassroomPackages(
       activeIssues,
       prematureSwaps,
       primaryEquipmentSummary,
+      // Room Usage & Urgency metrics
+      usageRank,
+      totalRankedRooms,
+      usageTier,
+      usageHours,
+      utilizationRate,
+      urgencyScore,
+      urgencyRating,
     });
   });
 
@@ -855,23 +1121,22 @@ export function createDefaultBaselineScenario(): PlanningScenario {
 export function resolveScenarioItems(
   masterItems: AVItem[],
   scenario: PlanningScenario,
-  refDate: Date = SYSTEM_NOW
+  refDateOrLifespans?: Date | Partial<CategoryLifespans>,
+  categoryLifespansParam?: Partial<CategoryLifespans>
 ): AVItem[] {
-  if (
-    scenario.isBaseline ||
-    (!Object.keys(scenario.itemOverrides).length && !Object.keys(scenario.roomOverrides).length)
-  ) {
-    return masterItems;
+  let refDate = SYSTEM_NOW;
+  let categoryLifespans = categoryLifespansParam;
+  if (refDateOrLifespans instanceof Date) {
+    refDate = refDateOrLifespans;
+  } else if (refDateOrLifespans && typeof refDateOrLifespans === 'object') {
+    categoryLifespans = refDateOrLifespans;
   }
-
+  const activeLifespans = scenario.categoryLifespans || categoryLifespans;
+  
   return masterItems.map((masterItem) => {
     const roomKey = `${masterItem.building}::${masterItem.room}`;
-    const roomOverride = scenario.roomOverrides[roomKey];
-    const itemOverride = scenario.itemOverrides[masterItem.id];
-
-    if (!roomOverride && !itemOverride) {
-      return masterItem;
-    }
+    const roomOverride = scenario.roomOverrides?.[roomKey];
+    const itemOverride = scenario.itemOverrides?.[masterItem.id];
 
     const targetFiscalYear =
       itemOverride?.targetFiscalYear || roomOverride?.targetFiscalYear || masterItem.targetFiscalYear;
@@ -888,7 +1153,8 @@ export function resolveScenarioItems(
         roomBaselineCost,
         planningPriority,
       },
-      refDate
+      refDate,
+      activeLifespans
     );
   });
 }
@@ -904,6 +1170,8 @@ export interface LevelingMove {
   readinessRating: string;
   reason: string;
   hasCriticalFailure: boolean;
+  usageRank?: number;
+  usageTier?: RoomUsageTier;
 }
 
 export interface LevelingProposal {
@@ -917,7 +1185,7 @@ export interface LevelingProposal {
  * 1-Click Automated Budget Leveling / Triage Engine:
  * Analyzes scheduled project costs across fiscal years against the annualBudgetCeiling.
  * Deferral candidates are prioritized by high readiness scores (healthy rooms deferred first),
- * while protecting critical failures and high-risk rooms from being pushed back.
+ * while protecting critical failures and HIGH USAGE rooms from being pushed back.
  */
 export function generateLevelingProposal(
   packages: ClassroomPackage[],
@@ -960,13 +1228,36 @@ export function generateLevelingProposal(
     const candidatesInYear = pkgCopies.filter((p) => p.currentScheduledFY === currentFY);
 
     // Filter out rooms that cannot be deferred:
-    // Protect rooms with critical hardware failures, severe conditions (score < 40), or 'Critical' priority
-    const deferrableRooms = candidatesInYear.filter(
-      (p) => !p.hasCriticalFailure && p.readinessScore >= 40 && p.planningPriority !== 'Critical'
+    // Protect rooms with critical hardware failures, severe conditions (score < 40), 'Critical' priority,
+    // and protect Top Usage classrooms (Rank #1-5 or High Usage tier) to safeguard high-impact student spaces!
+    let deferrableRooms = candidatesInYear.filter(
+      (p) =>
+        !p.hasCriticalFailure &&
+        p.readinessScore >= 40 &&
+        p.planningPriority !== 'Critical' &&
+        p.usageTier !== 'High Usage' &&
+        (p.usageRank === undefined || p.usageRank > 5)
     );
 
-    // Sort deferrable candidates by readiness score DESCENDING (healthiest rooms with highest readiness deferred first!)
-    deferrableRooms.sort((a, b) => b.readinessScore - a.readinessScore);
+    // If still over ceiling, relax usage protection for rooms with Optimal readiness (> 80)
+    if (deferrableRooms.length === 0) {
+      deferrableRooms = candidatesInYear.filter(
+        (p) => !p.hasCriticalFailure && p.readinessScore >= 75 && p.planningPriority !== 'Critical'
+      );
+    }
+
+    // Sort deferrable candidates:
+    // 1. Lowest usage tier first (Low Usage before Moderate Usage)
+    // 2. Healthiest rooms with highest readiness score deferred first
+    deferrableRooms.sort((a, b) => {
+      const rankA = a.usageRank ?? 999;
+      const rankB = b.usageRank ?? 999;
+      // Higher rank number = lower usage on campus = safer to defer
+      if (Math.abs(rankB - rankA) > 3) {
+        return rankB - rankA;
+      }
+      return b.readinessScore - a.readinessScore;
+    });
 
     for (const roomPkg of deferrableRooms) {
       if ((currentSpend[currentFY] || 0) <= annualBudgetCeiling) {

@@ -16,6 +16,7 @@ import {
   Filter,
   Layers,
   Info,
+  TrendingUp,
 } from 'lucide-react';
 
 interface RoomReadinessReportModalProps {
@@ -467,8 +468,26 @@ export const RoomReadinessReportModal: React.FC<RoomReadinessReportModalProps> =
                       </div>
                     </div>
 
-                    {/* Color-Coded Score Badge */}
-                    <div className="flex items-center gap-2 shrink-0">
+                    {/* Color-Coded Score Badge & Campus Usage Tag */}
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      {pkg.usageRank && (
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border shadow-2xs ${
+                            pkg.usageTier === 'High Usage'
+                              ? 'bg-purple-600 text-white border-purple-700'
+                              : pkg.usageTier === 'Moderate Usage'
+                              ? 'bg-indigo-600 text-white border-indigo-700'
+                              : 'bg-slate-700 text-white border-slate-800'
+                          }`}
+                          title={`Campus Traffic Rank #${pkg.usageRank} of ${pkg.totalRankedRooms || '?'} · ${pkg.usageHours ? pkg.usageHours + ' hrs/wk' : ''} ${pkg.utilizationRate ? '(' + pkg.utilizationRate + '% util)' : ''} · Urgency Score: ${pkg.urgencyScore || 0}/100`}
+                        >
+                          <TrendingUp className="w-3.5 h-3.5" />
+                          <span>#{pkg.usageRank} Use</span>
+                          <span>·</span>
+                          <span>{pkg.urgencyRating}</span>
+                        </span>
+                      )}
+
                       <span
                         className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border shadow-2xs ${
                           isRed

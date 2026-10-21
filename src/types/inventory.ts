@@ -56,6 +56,36 @@ export interface RoomPlanningOverride {
   priority?: 'Critical' | 'Standard' | 'Elective';
 }
 
+export interface CategoryLifespans {
+  screen: number; // default 10 years
+  switcherControllerProcessor: number; // default 7 years
+  projectors: number; // default 7 years
+  documentCamera: number; // default 7 years
+  cameraCeilingMics: number; // default 7 years
+  flatPanel: number; // default 7 years
+  wirelessAndOther: number; // default 5 years
+}
+
+export interface RoomUsageRanking {
+  room: string; // e.g. "NH-105" or "105" or "RB-250"
+  building?: string; // e.g. "Nobel Hall"
+  rank: number; // 1 = highest usage on campus
+  usageHours?: number; // e.g. weekly scheduled class hours
+  utilizationRate?: number; // e.g. 92%
+  spaceType?: string;
+  notes?: string;
+}
+
+export type RoomUsageTier = 'High Usage' | 'Moderate Usage' | 'Low Usage' | 'Unranked';
+
+export interface RoomUsageData {
+  filename: string;
+  uploadedAt: string;
+  totalRooms: number;
+  rankings: RoomUsageRanking[];
+  roomRankMap: Record<string, RoomUsageRanking>; // Keyed by `${building}::${room}` or `${room}`
+}
+
 export interface PlanningScenario {
   id: string;
   name: string; // e.g. "Baseline (Mechanical EOL)", "5-Year Levelized CapEx", "Conservative Triage"
@@ -63,6 +93,7 @@ export interface PlanningScenario {
   isBaseline: boolean; // True for read-only mechanical baseline
   annualBudgetCeiling: number; // e.g., 250000 ($250k / year)
   inflationRate: number; // e.g. 0.05
+  categoryLifespans?: Partial<CategoryLifespans>;
   itemOverrides: Record<string, ItemPlanningOverride>; // Keyed by item.id
   roomOverrides: Record<string, RoomPlanningOverride>; // Keyed by `${building}::${room}`
   createdAt: string;
@@ -166,6 +197,15 @@ export interface ClassroomPackage {
   activeIssues: string[];
   prematureSwaps: AVItem[]; // Items failing ahead of master room overhaul
   primaryEquipmentSummary: string; // e.g. "Epson EB-L630U + Extron MLC 55 + Da-Lite"
+
+  // Room Usage & Student Impact Metrics (from optional usage ranking upload)
+  usageRank?: number; // e.g. #1, #2...
+  totalRankedRooms?: number;
+  usageTier?: RoomUsageTier;
+  usageHours?: number; // weekly class hours
+  utilizationRate?: number; // percentage
+  urgencyScore?: number; // 0-100 combined hardware degradation & student impact
+  urgencyRating?: 'Critical Urgency' | 'High Urgency' | 'Moderate Urgency' | 'Low Urgency';
 }
 
 export type PlanningMode = 'bundled_rooms' | 'component_assets';

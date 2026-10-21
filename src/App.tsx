@@ -8,6 +8,8 @@ import {
   PlanningScenario,
   RoomPlanningOverride,
   ItemPlanningOverride,
+  CategoryLifespans,
+  RoomUsageData,
 } from './types/inventory';
 import { getSampleInventory } from './data/sampleData';
 import {
@@ -18,6 +20,7 @@ import {
   createDefaultBaselineScenario,
   createLevelizedScenarioPreset,
   resolveScenarioItems,
+  DEFAULT_CATEGORY_LIFESPANS,
 } from './utils/calculations';
 import { Header } from './components/Header';
 import { ScenarioToolbar } from './components/ScenarioToolbar';
@@ -33,6 +36,8 @@ import { BatchActionToolbar } from './components/BatchActionToolbar';
 import { ItemDetailModal } from './components/ItemDetailModal';
 import { BudgetReportModal } from './components/BudgetReportModal';
 import { RoomReadinessReportModal } from './components/RoomReadinessReportModal';
+import { CategoryLifespanModal } from './components/CategoryLifespanModal';
+import { RoomUsageUploadModal } from './components/RoomUsageUploadModal';
 import { exportActiveInventory, exportClassroomPackages, exportRoomReadinessReport } from './utils/spreadsheet';
 import { generateRoomReadinessPDF } from './utils/pdfGenerator';
 import {
@@ -55,6 +60,12 @@ export default function App() {
   const [masterItems, setMasterItems] = useState<AVItem[]>(() => getSampleInventory());
   const [activeFilename, setActiveFilename] = useState<string | null>('Sample_College_AV_Fleet.xlsx');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'bundled' | 'kanban' | 'maintenance' | 'inventory' | 'reports'>('dashboard');
+
+  // Category-Specific Default Lifespans (modifiable by user)
+  const [categoryLifespans, setCategoryLifespans] = useState<CategoryLifespans>(() => ({ ...DEFAULT_CATEGORY_LIFESPANS }));
+
+  // Optional Room Usage Ranking overlay (null until user uploads separate ranking spreadsheet)
+  const [roomUsageData, setRoomUsageData] = useState<RoomUsageData | null>(null);
 
   // Multi-Scenario Modeling State
   const [scenarios, setScenarios] = useState<PlanningScenario[]>(() => {
@@ -79,6 +90,8 @@ export default function App() {
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isReadinessModalOpen, setIsReadinessModalOpen] = useState(false);
   const [isAutoLevelerOpen, setIsAutoLevelerOpen] = useState(false);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isUsageModalOpen, setIsUsageModalOpen] = useState(false);
   const [isExportingReadinessQuick, setIsExportingReadinessQuick] = useState(false);
   const [selectedFY, setSelectedFY] = useState<string | null>(null);
 
@@ -95,26 +108,29 @@ export default function App() {
     [scenarios, activeScenarioId]
   );
 
-  // Dynamically resolve master items with active scenario planning overrides
+  // Dynamically resolve master items with active scenario planning overrides and category lifespans
   const activeItems = useMemo(() => {
-    return resolveScenarioItems(masterItems, activeScenario);
-  }, [masterItems, activeScenario]);
+    return resolveScenarioItems(masterItems, activeScenario, categoryLifespans);
+  }, [masterItems, activeScenario, categoryLifespans]);
 
   // Dynamically adjust items if What-If simulation slider is active
   const simulatedItems = useMemo(() => {
     if (lifespanOffset === 0) return activeItems;
     return activeItems.map((it) =>
-      enrichAVItem({
-        ...it,
-        shelflifeYears: Math.max(2, it.shelflifeYears + lifespanOffset),
-      })
+      enrichAVItem(
+        {
+          ...it,
+          shelflifeYears: Math.max(2, it.shelflifeYears + lifespanOffset),
+        },
+        categoryLifespans
+      )
     );
-  }, [activeItems, lifespanOffset]);
+  }, [activeItems, lifespanOffset, categoryLifespans]);
 
-  // Derived Analytics (Whole-Room packages computed first so inflation & readiness feed into budgets)
+  // Derived Analytics (Whole-Room packages computed with optional Room Usage Rankings and compounding inflation)
   const classroomPackages: ClassroomPackage[] = useMemo(
-    () => groupItemsIntoClassroomPackages(simulatedItems, activeScenario.inflationRate || 0.05),
-    [simulatedItems, activeScenario.inflationRate]
+    () => groupItemsIntoClassroomPackages(simulatedItems, activeScenario.inflationRate || 0.05, roomUsageData),
+    [simulatedItems, activeScenario.inflationRate, roomUsageData]
   );
 
   const fiscalBudgets: FiscalYearBudget[] = useMemo(
@@ -492,6 +508,7 @@ export default function App() {
     setEditedCount(0);
     setLastExportedTime(null);
     setSelectedItemIds([]);
+    setRoomUsageData(null);
     const baseline = createDefaultBaselineScenario();
     const levelized = createLevelizedScenarioPreset(sample);
     setScenarios([baseline, levelized]);
@@ -505,6 +522,7 @@ export default function App() {
     setEditedCount(0);
     setLastExportedTime(null);
     setSelectedItemIds([]);
+    setRoomUsageData(null);
   };
 
   const handleOpenItem = (item: AVItem) => {
@@ -612,6 +630,9 @@ export default function App() {
           onImportScenario={handleImportScenario}
           onOpenAutoLeveler={() => setIsAutoLevelerOpen(true)}
           overCeilingYearsCount={overCeilingYearsCount}
+          onOpenCategoryLifespans={() => setIsCategoryModalOpen(true)}
+          onOpenUsageUpload={() => setIsUsageModalOpen(true)}
+          hasUsageData={!!roomUsageData}
         />
       )}
 
@@ -820,23 +841,76 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* What-If Shelflife Budget Simulator */}
+                  {/* What-If Shelflife Policy Simulator */}
                   <div className="bg-white border border-slate-200 rounded-lg p-5 flex flex-col justify-between">
                     <div>
-                      <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
-                        <Sliders className="w-4 h-4 text-sky-600" />
-                        <h3 className="text-sm font-bold text-slate-900">
-                          What-If Shelflife Policy Simulator
-                        </h3>
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-100 gap-2">
+                        <div className="flex items-center gap-2">
+                          <Sliders className="w-4 h-4 text-sky-600" />
+                          <h3 className="text-sm font-bold text-slate-900">
+                            What-If Shelflife Policy Simulator
+                          </h3>
+                        </div>
+                        <button
+                          onClick={() => setIsCategoryModalOpen(true)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded transition-colors shadow-2xs"
+                          title="Call out modal to adjust individual category lifespans"
+                        >
+                          <Sliders className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Adjust Category Years</span>
+                        </button>
                       </div>
                       <p className="text-xs text-slate-500 mt-2">
-                        Simulate the budget impact of adjusting standard replacement cycles across all classroom hardware.
+                        Simulate the budget and forecast impact of adjusting category-specific lifespans or applying a fleet cycle offset.
                       </p>
 
-                      <div className="mt-5 space-y-4">
+                      {/* Category Default Lifespans Grid & Quick Call-Out */}
+                      <div className="mt-3 p-3 bg-slate-50/80 rounded border border-slate-200 text-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-slate-700 text-[11px] uppercase tracking-wider">
+                            Active Category Lifespans:
+                          </span>
+                          <button
+                            onClick={() => setIsCategoryModalOpen(true)}
+                            className="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium underline"
+                          >
+                            Edit Categories
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
+                          <div className="flex justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                            <span className="font-sans text-slate-600">Screens:</span>
+                            <strong className="text-indigo-700">{categoryLifespans.screen} yrs</strong>
+                          </div>
+                          <div className="flex justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                            <span className="font-sans text-slate-600">Switchers/DSP:</span>
+                            <strong className="text-indigo-700">{categoryLifespans.switcherControllerProcessor} yrs</strong>
+                          </div>
+                          <div className="flex justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                            <span className="font-sans text-slate-600">Projectors:</span>
+                            <strong className="text-indigo-700">{categoryLifespans.projectors} yrs</strong>
+                          </div>
+                          <div className="flex justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                            <span className="font-sans text-slate-600">Doc Cameras:</span>
+                            <strong className="text-indigo-700">{categoryLifespans.documentCamera} yrs</strong>
+                          </div>
+                          <div className="flex justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                            <span className="font-sans text-slate-600">Cameras & Mics:</span>
+                            <strong className="text-indigo-700">{categoryLifespans.cameraCeilingMics} yrs</strong>
+                          </div>
+                          <div className="flex justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                            <span className="font-sans text-slate-600">Displays:</span>
+                            <strong className="text-indigo-700">{categoryLifespans.flatPanel} yrs</strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Global Cycle Offset Stepper */}
+                      <div className="mt-4 space-y-3">
                         <div>
                           <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                            <span>Adjust Shelflife Offset:</span>
+                            <span>Global Fleet Cycle Offset:</span>
                             <span className="font-mono text-sky-700">
                               {lifespanOffset === 0
                                 ? 'Standard Policy (0 yrs)'
@@ -854,13 +928,13 @@ export default function App() {
                                     : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                                 }`}
                               >
-                                {val === 0 ? 'Default' : val > 0 ? `+${val} yr` : `${val} yr`}
+                                {val === 0 ? 'Standard' : val > 0 ? `+${val} yr` : `${val} yr`}
                               </button>
                             ))}
                           </div>
                         </div>
 
-                        <div className="p-3 bg-slate-50 rounded border border-slate-100 text-xs space-y-1.5 font-mono tabular-nums">
+                        <div className="p-2.5 bg-slate-50 rounded border border-slate-100 text-xs space-y-1.5 font-mono tabular-nums">
                           <div className="flex justify-between text-slate-600">
                             <span>Simulated Next FY CapEx:</span>
                             <span className="font-bold text-slate-900">${stats.nextFiscalYearBudget.toLocaleString()}</span>
@@ -872,11 +946,29 @@ export default function App() {
                             </span>
                           </div>
                         </div>
+
+                        {/* Room Usage Ranking Status */}
+                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`w-2 h-2 rounded-full ${roomUsageData ? 'bg-purple-600' : 'bg-slate-400'}`} />
+                            <span className="text-slate-600">
+                              {roomUsageData
+                                ? `${roomUsageData.totalRooms} rooms ranked for usage`
+                                : 'Room usage ranking unlinked'}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => setIsUsageModalOpen(true)}
+                            className="text-xs font-semibold text-purple-700 hover:text-purple-900 underline"
+                          >
+                            {roomUsageData ? 'Manage Rankings' : 'Upload Rankings'}
+                          </button>
+                        </div>
                       </div>
                     </div>
 
                     <div className="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-500">
-                      Calculations update in real time. Does not alter your uploaded file.
+                      Calculations update in real time. Does not alter your master uploaded file.
                     </div>
                   </div>
                 </div>
@@ -1324,6 +1416,29 @@ export default function App() {
         onBatchAssignFY={handleBatchAssignFY}
         onBatchAssignPriority={handleBatchAssignPriority}
         onBatchResetBaseline={handleBatchResetBaseline}
+      />
+      {/* 7. Category-Specific Default Lifespans Modal */}
+      <CategoryLifespanModal
+        isOpen={isCategoryModalOpen}
+        onClose={() => setIsCategoryModalOpen(false)}
+        activeLifespans={categoryLifespans}
+        onSaveLifespans={(newLifespans: CategoryLifespans) => {
+          setCategoryLifespans(newLifespans);
+          setEditedCount((prev) => prev + 1);
+        }}
+        items={activeItems}
+      />
+
+      {/* 8. Room Usage Ranking Upload & Cross-Referencing Modal */}
+      <RoomUsageUploadModal
+        isOpen={isUsageModalOpen}
+        onClose={() => setIsUsageModalOpen(false)}
+        roomUsageData={roomUsageData}
+        onSaveUsageData={(data: RoomUsageData | null) => {
+          setRoomUsageData(data);
+          setEditedCount((prev) => prev + 1);
+        }}
+        classroomPackages={classroomPackages}
       />
     </div>
   );

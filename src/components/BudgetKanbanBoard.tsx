@@ -14,6 +14,8 @@ import {
   DollarSign,
   ArrowRight,
   ShieldAlert,
+  TrendingUp,
+  Zap,
 } from 'lucide-react';
 
 interface BudgetKanbanBoardProps {
@@ -38,23 +40,12 @@ export const BudgetKanbanBoard: React.FC<BudgetKanbanBoardProps> = ({
   const [search, setSearch] = useState('');
   const [selectedBuilding, setSelectedBuilding] = useState('all');
   const [selectedSpaceType, setSelectedSpaceType] = useState('all');
+  const [selectedUrgency, setSelectedUrgency] = useState('all');
+  const [selectedUsageTier, setSelectedUsageTier] = useState('all');
   const [viewMode, setViewMode] = useState<'rooms' | 'components'>('rooms');
 
   const ceiling = activeScenario.annualBudgetCeiling || 250000;
-
-  // Fiscal Year columns: e.g. FY2026 through FY2031
   const baseYear = 2026;
-  const columns = useMemo(() => {
-    const list = [
-      'FY2026',
-      'FY2027',
-      'FY2028',
-      'FY2029',
-      'FY2030',
-      'FY2031',
-    ];
-    return list;
-  }, []);
 
   // Filter unique buildings & space types
   const buildings = useMemo(
@@ -71,6 +62,8 @@ export const BudgetKanbanBoard: React.FC<BudgetKanbanBoardProps> = ({
     return classroomPackages.filter((pkg) => {
       if (selectedBuilding !== 'all' && pkg.building !== selectedBuilding) return false;
       if (selectedSpaceType !== 'all' && pkg.spaceType !== selectedSpaceType) return false;
+      if (selectedUrgency !== 'all' && pkg.urgencyRating !== selectedUrgency) return false;
+      if (selectedUsageTier !== 'all' && pkg.usageTier !== selectedUsageTier) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
         const matchRoom = pkg.roomName.toLowerCase().includes(q);
@@ -81,7 +74,34 @@ export const BudgetKanbanBoard: React.FC<BudgetKanbanBoardProps> = ({
       }
       return true;
     });
-  }, [classroomPackages, selectedBuilding, selectedSpaceType, search]);
+  }, [classroomPackages, selectedBuilding, selectedSpaceType, selectedUrgency, selectedUsageTier, search]);
+
+  // Fiscal Year columns: e.g. FY2026 through FY2031 (or higher if rooms are deferred further)
+  const columns = useMemo(() => {
+    let maxYear = 2031;
+    filteredPackages.forEach((pkg) => {
+      const y = parseInt((pkg.projectedFiscalYear || '').replace(/\D/g, ''), 10);
+      if (!isNaN(y) && y > maxYear && y <= 2045) {
+        maxYear = y;
+      }
+    });
+    const list: string[] = [];
+    for (let y = baseYear; y <= maxYear; y++) {
+      list.push(`FY${y}`);
+    }
+    return list;
+  }, [filteredPackages]);
+
+  // Adaptive dropdown options helper: For any column year, include baseYear through colYear + 5
+  const getAdaptiveFiscalYearsForColumn = (colFY: string): string[] => {
+    const colYear = parseInt(colFY.replace(/\D/g, ''), 10) || baseYear;
+    const maxYear = Math.max(baseYear + 5, colYear + 5);
+    const options: string[] = [];
+    for (let y = baseYear; y <= maxYear; y++) {
+      options.push(`FY${y}`);
+    }
+    return options;
+  };
 
   // Aggregate columns spend & count
   const columnData = useMemo(() => {
@@ -110,28 +130,34 @@ export const BudgetKanbanBoard: React.FC<BudgetKanbanBoardProps> = ({
 
     filteredPackages.forEach((pkg) => {
       let target = pkg.projectedFiscalYear || 'FY2026';
-      // Normalize target FY to columns range
-      if (!columns.includes(target)) {
-        const targetNum = parseInt(target.replace('FY', ''), 10);
-        if (targetNum <= baseYear) {
-          target = columns[0];
-        } else {
-          target = columns[columns.length - 1];
-        }
+      const targetNum = parseInt(target.replace(/\D/g, ''), 10) || baseYear;
+      if (targetNum < baseYear) {
+        target = `FY${baseYear}`;
       }
 
-      if (map[target]) {
-        map[target].packages.push(pkg);
-        map[target].totalCost += pkg.projectedOverhaulCost;
-        if (pkg.isOverdue) map[target].overdueCount += 1;
+      if (!map[target]) {
+        map[target] = {
+          fy: target,
+          packages: [],
+          totalCost: 0,
+          overdueCount: 0,
+          isOverCeiling: false,
+          variance: ceiling,
+        };
       }
+
+      map[target].packages.push(pkg);
+      map[target].totalCost += pkg.projectedOverhaulCost;
+      if (pkg.isOverdue) map[target].overdueCount += 1;
     });
 
     // Compute variances
     columns.forEach((fy) => {
       const col = map[fy];
-      col.variance = ceiling - col.totalCost;
-      col.isOverCeiling = col.totalCost > ceiling;
+      if (col) {
+        col.variance = ceiling - col.totalCost;
+        col.isOverCeiling = col.totalCost > ceiling;
+      }
     });
 
     return map;
@@ -139,12 +165,9 @@ export const BudgetKanbanBoard: React.FC<BudgetKanbanBoardProps> = ({
 
   const handleShift = (pkg: ClassroomPackage, direction: -1 | 1) => {
     const currentFY = pkg.projectedFiscalYear || 'FY2026';
-    const currentIdx = columns.indexOf(currentFY);
-    let newIdx = currentIdx !== -1 ? currentIdx + direction : 0;
-    if (newIdx < 0) newIdx = 0;
-    if (newIdx >= columns.length) newIdx = columns.length - 1;
-    const targetFY = columns[newIdx];
-    onUpdateRoomSchedule(pkg.building, pkg.roomName, targetFY);
+    const currentYear = parseInt(currentFY.replace(/\D/g, ''), 10) || baseYear;
+    const newYear = Math.max(baseYear, currentYear + direction);
+    onUpdateRoomSchedule(pkg.building, pkg.roomName, `FY${newYear}`);
   };
 
   return (
@@ -217,11 +240,39 @@ export const BudgetKanbanBoard: React.FC<BudgetKanbanBoardProps> = ({
             ))}
           </select>
 
-          {(selectedBuilding !== 'all' || selectedSpaceType !== 'all' || search) && (
+          <select
+            value={selectedUrgency}
+            onChange={(e) => setSelectedUrgency(e.target.value)}
+            className="bg-amber-50 border border-amber-300 rounded px-2.5 py-1 text-amber-900 font-semibold focus:ring-1 focus:ring-amber-500"
+            title="Filter Kanban cards by room overhaul urgency"
+          >
+            <option value="all">All Urgency Levels</option>
+            <option value="Critical Urgency">Critical Urgency</option>
+            <option value="High Urgency">High Urgency</option>
+            <option value="Moderate Urgency">Moderate Urgency</option>
+            <option value="Low Urgency">Low Urgency</option>
+          </select>
+
+          <select
+            value={selectedUsageTier}
+            onChange={(e) => setSelectedUsageTier(e.target.value)}
+            className="bg-purple-50 border border-purple-300 rounded px-2.5 py-1 text-purple-900 font-semibold focus:ring-1 focus:ring-purple-500"
+            title="Filter Kanban cards by campus usage intensity"
+          >
+            <option value="all">All Usage Tiers</option>
+            <option value="High Usage">High Usage</option>
+            <option value="Moderate Usage">Moderate Usage</option>
+            <option value="Low Usage">Low Usage</option>
+            <option value="Unranked">Unranked Spaces</option>
+          </select>
+
+          {(selectedBuilding !== 'all' || selectedSpaceType !== 'all' || selectedUrgency !== 'all' || selectedUsageTier !== 'all' || search) && (
             <button
               onClick={() => {
                 setSelectedBuilding('all');
                 setSelectedSpaceType('all');
+                setSelectedUrgency('all');
+                setSelectedUsageTier('all');
                 setSearch('');
               }}
               className="text-sky-600 hover:text-sky-800 underline font-medium ml-auto"
@@ -377,6 +428,47 @@ export const BudgetKanbanBoard: React.FC<BudgetKanbanBoardProps> = ({
                               Classroom Down
                             </span>
                           )}
+
+                          {/* Overhaul Urgency Badge (ALWAYS SHOWN) */}
+                          <span
+                            className={`text-[10px] font-bold px-1.5 py-0.2 rounded border flex items-center gap-1 ${
+                              pkg.urgencyRating === 'Critical Urgency'
+                                ? 'bg-rose-100 text-rose-900 border-rose-300'
+                                : pkg.urgencyRating === 'High Urgency'
+                                ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                : pkg.urgencyRating === 'Moderate Urgency'
+                                ? 'bg-sky-100 text-sky-800 border-sky-200'
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            }`}
+                            title={`Overhaul Urgency: ${pkg.urgencyRating} · Urgency Score: ${pkg.urgencyScore || 0}/100`}
+                          >
+                            {pkg.urgencyRating === 'Critical Urgency' ? (
+                              <AlertTriangle className="w-2.5 h-2.5 text-rose-600" />
+                            ) : pkg.urgencyRating === 'High Urgency' ? (
+                              <Zap className="w-2.5 h-2.5 text-amber-600" />
+                            ) : null}
+                            <span>{pkg.urgencyRating || 'Moderate Urgency'}</span>
+                          </span>
+
+                          {/* Room Usage Ranking Badge (when ranked) */}
+                          {pkg.usageRank && (
+                            <span
+                              className={`text-[10px] font-bold px-1.5 py-0.2 rounded border flex items-center gap-1 ${
+                                pkg.usageTier === 'High Usage'
+                                  ? 'bg-purple-100 text-purple-900 border-purple-300'
+                                  : pkg.usageTier === 'Moderate Usage'
+                                  ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                                  : 'bg-slate-100 text-slate-700 border-slate-200'
+                              }`}
+                              title={`Campus Usage Rank #${pkg.usageRank} of ${pkg.totalRankedRooms || '?'} · ${pkg.usageHours ? pkg.usageHours + ' hrs/wk' : ''} ${pkg.utilizationRate ? '(' + pkg.utilizationRate + '%)' : ''}`}
+                            >
+                              <TrendingUp className="w-2.5 h-2.5 text-purple-700" />
+                              <span>#{pkg.usageRank} Use</span>
+                              {pkg.usageTier === 'High Usage' && (
+                                <span className="font-semibold text-purple-700 text-[9px]">(Top)</span>
+                              )}
+                            </span>
+                          )}
                         </div>
 
                         {/* Equipment Summary */}
@@ -403,25 +495,33 @@ export const BudgetKanbanBoard: React.FC<BudgetKanbanBoardProps> = ({
                               <ChevronLeft className="w-3.5 h-3.5" />
                             </button>
 
-                            {/* Dropdown jump */}
-                            <select
-                              value={pkg.projectedFiscalYear}
-                              onChange={(e) => onUpdateRoomSchedule(pkg.building, pkg.roomName, e.target.value)}
-                              className="text-[10px] font-mono font-semibold bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-slate-700"
-                            >
-                              {columns.map((c) => (
-                                <option key={c} value={c}>
-                                  {c}
-                                </option>
-                              ))}
-                            </select>
+                            {/* Adaptive Dropdown: Includes baseYear (2026) up to colYear + 5 */}
+                            {(() => {
+                              const adaptiveOptions = getAdaptiveFiscalYearsForColumn(fy);
+                              if (pkg.projectedFiscalYear && !adaptiveOptions.includes(pkg.projectedFiscalYear)) {
+                                adaptiveOptions.push(pkg.projectedFiscalYear);
+                                adaptiveOptions.sort();
+                              }
+
+                              return (
+                                <select
+                                  value={pkg.projectedFiscalYear}
+                                  onChange={(e) => onUpdateRoomSchedule(pkg.building, pkg.roomName, e.target.value)}
+                                  className="text-[10px] font-mono font-semibold bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-slate-700 hover:border-indigo-400 focus:ring-1 focus:ring-indigo-500"
+                                  title={`Move overhaul year. Options include current FY2026 through FY${(parseInt(fy.replace(/\D/g, ''), 10) || baseYear) + 5}`}
+                                >
+                                  {adaptiveOptions.map((c) => (
+                                    <option key={c} value={c}>
+                                      {c}
+                                    </option>
+                                  ))}
+                                </select>
+                              );
+                            })()}
 
                             <button
-                              disabled={colIdx === columns.length - 1}
                               onClick={() => handleShift(pkg, 1)}
-                              className={`p-1 rounded text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors ${
-                                colIdx === columns.length - 1 ? 'opacity-30 cursor-not-allowed' : ''
-                              }`}
+                              className="p-1 rounded text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
                               title="Defer to later fiscal year (+1 yr)"
                             >
                               <ChevronRight className="w-3.5 h-3.5" />

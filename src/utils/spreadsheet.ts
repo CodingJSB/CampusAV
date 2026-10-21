@@ -6,8 +6,17 @@ import {
   EquipmentCondition,
   MaintenanceStatus,
   PlanningScenario,
+  CategoryLifespans,
+  RoomUsageData,
+  RoomUsageRanking,
 } from '../types/inventory';
-import { enrichAVItem, getRoomReadinessExplanation, groupItemsIntoClassroomPackages } from './calculations';
+import {
+  enrichAVItem,
+  getRoomReadinessExplanation,
+  groupItemsIntoClassroomPackages,
+  getCategoryLifespan,
+  DEFAULT_CATEGORY_LIFESPANS,
+} from './calculations';
 
 /**
  * Normalizes string keys for flexible header matching
@@ -417,7 +426,12 @@ export async function inspectSpreadsheet(file: File): Promise<SpreadsheetInspect
 /**
  * Parses raw data rows into enriched AV items using specified column mapping
  */
-export function processRowsWithMapping(rawData: Record<string, any>[], mapping: ColumnMapping, filename: string): AVItem[] {
+export function processRowsWithMapping(
+  rawData: Record<string, any>[],
+  mapping: ColumnMapping,
+  filename: string,
+  categoryLifespans?: Partial<CategoryLifespans>
+): AVItem[] {
   return rawData.map((row, index) => {
     const getVal = (col: string) => (col && row[col] !== undefined ? row[col] : '');
 
@@ -442,11 +456,8 @@ export function processRowsWithMapping(rawData: Record<string, any>[], mapping: 
       ? rawYear
       : (!isNaN(dateDerivedYear) && dateDerivedYear >= 1990 && dateDerivedYear <= 2040 ? dateDerivedYear : 2022);
 
-    // Validate shelf-life strictly between 1 and 25 years (prevents room numbers or lamp hours from corrupting lifespans)
-    const rawLifespan = Number(getVal(mapping.shelflifeYears));
-    const shelflifeYears = (!isNaN(rawLifespan) && rawLifespan >= 1 && rawLifespan <= 25)
-      ? Math.round(rawLifespan)
-      : getDefaultLifespan(category);
+    // Instead of specifying the years on the user spreadsheet, use category-specific default values
+    const shelflifeYears = getCategoryLifespan(category, categoryLifespans);
 
     // If replacement cost is empty or zero, apply category standard baseline estimate
     const rawCost = getVal(mapping.replacementCost);
@@ -559,12 +570,8 @@ export async function parseSpreadsheetFile(file: File): Promise<{
       ? parseInt(rawDate, 10)
       : parseInt(installDate.slice(0, 4), 10);
     
-    // Shelflife strictly bounded between 1 and 25 years
-    const rawLifespan = findVal('shelflifeyears', 'shelflife', 'lifespan', 'shelflifeyrs', 'expectedlife', 'usefullife');
-    const numLifespan = Number(rawLifespan);
-    const shelflifeYears = (!isNaN(numLifespan) && numLifespan >= 1 && numLifespan <= 25)
-      ? Math.round(numLifespan)
-      : getDefaultLifespan(category);
+    // Use category-specific default shelf life instead of user spreadsheet
+    const shelflifeYears = getCategoryLifespan(category);
 
     // Costs
     const rawCost = findVal('replacementcost', 'hardwarecost', 'cost', 'unitcost', 'price', 'estimate');
@@ -918,4 +925,233 @@ export function exportRoomReadinessReport(
   const filename =
     customFilename || `Room_Readiness_Report_${new Date().toISOString().split('T')[0]}.${format}`;
   XLSX.writeFile(workbook, filename, { bookType: format });
+}
+
+/**
+ * Parses user-uploaded Room Usage Ranking spreadsheet (.xlsx, .xls, .csv)
+ * Cross-references classroom space usage rankings across campus to highlight high-impact renovation targets.
+ */
+/**
+ * Parses user-uploaded Room Usage Ranking spreadsheet (.xlsx, .xls, .csv)
+ * Cross-references classroom space usage rankings across campus to highlight high-impact renovation targets.
+ * Ultra-robust to header row offsets, alias variations, text ranking tiers, and flexible room naming.
+ */
+export async function parseRoomUsageSpreadsheet(file: File): Promise<RoomUsageData> {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const sheetNames = workbook.SheetNames;
+  if (!sheetNames || sheetNames.length === 0) throw new Error('Spreadsheet has no sheets.');
+
+  // Pick first sheet or sheet explicitly named usage/ranking/schedule
+  let targetSheetName = sheetNames[0];
+  const preferredSheet = sheetNames.find((s) => {
+    const l = s.toLowerCase();
+    return l.includes('usage') || l.includes('rank') || l.includes('schedule') || l.includes('util');
+  });
+  if (preferredSheet) targetSheetName = preferredSheet;
+
+  const worksheet = workbook.Sheets[targetSheetName];
+  if (!worksheet) throw new Error('Could not access worksheet data.');
+
+  // Convert raw 2D matrix to find actual header row (in case row 1 contains report title/metadata)
+  const rawMatrix = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: '' });
+  if (rawMatrix.length === 0) throw new Error('Spreadsheet contains no data rows.');
+
+  const cleanStr = (s: any) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const roomKeywords = ['room', 'classroom', 'space', 'location', 'rm', 'facility', 'spaceid', 'roomid', 'area', 'lab'];
+  let headerRowIndex = 0;
+
+  for (let r = 0; r < Math.min(10, rawMatrix.length); r++) {
+    const row = rawMatrix[r];
+    if (Array.isArray(row)) {
+      const rowStrings = row.map((cell) => cleanStr(cell));
+      const hasRoomKeyword = rowStrings.some((str) => roomKeywords.some((kw) => str === kw || str.includes(kw)));
+      if (hasRoomKeyword) {
+        headerRowIndex = r;
+        break;
+      }
+    }
+  }
+
+  // Parse using detected header row
+  const rawData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
+    range: headerRowIndex,
+    defval: '',
+  });
+
+  if (rawData.length === 0) throw new Error('Spreadsheet contains no data rows below the header.');
+
+  const headers = Object.keys(rawData[0] || {});
+
+  const findHeader = (...aliases: string[]) => {
+    for (const alias of aliases) {
+      const cleanAlias = cleanStr(alias);
+      for (const h of headers) {
+        if (cleanStr(h) === cleanAlias) return h;
+      }
+    }
+    for (const alias of aliases) {
+      const cleanAlias = cleanStr(alias);
+      for (const h of headers) {
+        const cleanedH = cleanStr(h);
+        if (cleanedH.includes(cleanAlias)) return h;
+      }
+    }
+    return '';
+  };
+
+  const roomCol = findHeader(
+    'room',
+    'classroom',
+    'space',
+    'roomnumber',
+    'roomnum',
+    'roomno',
+    'roomid',
+    'rm',
+    'location',
+    'roomname',
+    'facility',
+    'spaceid',
+    'spacename',
+    'area',
+    'lab',
+    'facilityid',
+    'class'
+  );
+
+  const buildingCol = findHeader('building', 'bldg', 'hall', 'complex', 'facility', 'campus', 'center', 'house', 'dept', 'department');
+  const rankCol = findHeader('rank', 'usagerank', 'ranking', 'usage', 'priority', 'order', 'traffic', 'tier', 'usagetier', 'level', 'urgency', 'score', 'importance', 'intensity', 'impact', 'scheduling');
+  const hoursCol = findHeader('hours', 'weeklyhours', 'scheduledhours', 'classhours', 'usagehours', 'weeklyusage', 'utilizationhours', 'hoursperweek', 'hrsperwk', 'hrswk', 'weeklyscheduledhours', 'bookedhours', 'contacthours');
+  const rateCol = findHeader('utilization', 'rate', 'utilizationrate', 'occupancy', 'usagepercent', 'percentage', 'percent', 'pct', 'util');
+  const notesCol = findHeader('notes', 'comments', 'dept', 'department', 'type', 'spacetype', 'primaryuse', 'description', 'purpose');
+
+  if (!roomCol) {
+    throw new Error('Could not identify a Room / Space column in the uploaded file. Please verify column headers include Room or Classroom.');
+  }
+
+  interface RawParsedUsage {
+    room: string;
+    building?: string;
+    explicitRank?: number;
+    hours?: number;
+    rate?: number;
+    notes?: string;
+  }
+
+  const parsedCandidates: RawParsedUsage[] = [];
+
+  rawData.forEach((row) => {
+    const rawRoom = String(row[roomCol] || '').trim();
+    if (!rawRoom) return;
+
+    const building = buildingCol ? String(row[buildingCol] || '').trim() : undefined;
+    const notes = notesCol ? String(row[notesCol] || '').trim() : undefined;
+
+    let explicitRank: number | undefined = undefined;
+    if (rankCol && row[rankCol] !== undefined && row[rankCol] !== '') {
+      const rawRankStr = String(row[rankCol]).trim().toLowerCase();
+      // Support text tiers
+      if (rawRankStr.includes('crit') || rawRankStr.includes('top') || rawRankStr.includes('tier 1') || rawRankStr === 'high' || rawRankStr.includes('high usage')) {
+        explicitRank = 1;
+      } else if (rawRankStr.includes('mod') || rawRankStr.includes('med') || rawRankStr.includes('tier 2') || rawRankStr === 'medium') {
+        explicitRank = 5;
+      } else if (rawRankStr.includes('low') || rawRankStr.includes('min') || rawRankStr.includes('tier 3')) {
+        explicitRank = 10;
+      } else {
+        const parsedR = parseInt(rawRankStr.replace(/[^0-9]/g, ''), 10);
+        if (!isNaN(parsedR) && parsedR > 0) explicitRank = parsedR;
+      }
+    }
+
+    let hours: number | undefined = undefined;
+    if (hoursCol && row[hoursCol] !== undefined && row[hoursCol] !== '') {
+      const parsedH = parseFloat(String(row[hoursCol]).replace(/[^0-9.]/g, ''));
+      if (!isNaN(parsedH) && parsedH >= 0) hours = parsedH;
+    }
+
+    let rate: number | undefined = undefined;
+    if (rateCol && row[rateCol] !== undefined && row[rateCol] !== '') {
+      const parsedRate = parseFloat(String(row[rateCol]).replace(/[^0-9.]/g, ''));
+      if (!isNaN(parsedRate) && parsedRate >= 0) rate = parsedRate;
+    }
+
+    parsedCandidates.push({
+      room: rawRoom,
+      building,
+      explicitRank,
+      hours,
+      rate,
+      notes,
+    });
+  });
+
+  if (parsedCandidates.length === 0) {
+    throw new Error('No valid room usage rows were found in the uploaded file.');
+  }
+
+  // Determine ranks:
+  // If explicit rank was provided on all/most rows, sort by explicit rank.
+  // Otherwise sort by hours descending (or rate descending).
+  const hasExplicitRanks = parsedCandidates.filter((c) => c.explicitRank !== undefined).length >= parsedCandidates.length * 0.4;
+
+  if (hasExplicitRanks) {
+    parsedCandidates.sort((a, b) => (a.explicitRank || 999) - (b.explicitRank || 999));
+  } else {
+    // Sort descending by hours or utilization
+    parsedCandidates.sort((a, b) => {
+      const valA = a.hours !== undefined ? a.hours : (a.rate !== undefined ? a.rate : 0);
+      const valB = b.hours !== undefined ? b.hours : (b.rate !== undefined ? b.rate : 0);
+      return valB - valA;
+    });
+  }
+
+  const rankings: RoomUsageRanking[] = [];
+  const roomRankMap: Record<string, RoomUsageRanking> = {};
+
+  parsedCandidates.forEach((c, idx) => {
+    const finalRank = c.explicitRank !== undefined ? c.explicitRank : (idx + 1);
+    const item: RoomUsageRanking = {
+      room: c.room,
+      building: c.building,
+      rank: finalRank,
+      usageHours: c.hours,
+      utilizationRate: c.rate,
+      notes: c.notes,
+    };
+    rankings.push(item);
+
+    // Multi-key mapping for resilient cross-referencing
+    const rClean = cleanStr(c.room);
+    const rDigits = c.room.replace(/\D/g, '');
+
+    roomRankMap[c.room] = item;
+    roomRankMap[rClean] = item;
+    if (rDigits) {
+      roomRankMap[rDigits] = item;
+    }
+
+    if (c.building) {
+      const bClean = cleanStr(c.building);
+      roomRankMap[`${c.building}::${c.room}`] = item;
+      roomRankMap[`${bClean}::${rClean}`] = item;
+      roomRankMap[cleanStr(`${c.building} ${c.room}`)] = item;
+      if (rDigits) {
+        roomRankMap[`${bClean}::${rDigits}`] = item;
+      }
+    }
+
+    if (c.notes) {
+      roomRankMap[cleanStr(c.notes)] = item;
+    }
+  });
+
+  return {
+    filename: file.name,
+    uploadedAt: new Date().toISOString(),
+    totalRooms: rankings.length,
+    rankings,
+    roomRankMap,
+  };
 }

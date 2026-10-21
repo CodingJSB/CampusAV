@@ -780,3 +780,4 @@ const rawUserData = [
 export function getSampleInventory(): AVItem[] {
   return rawUserData.map((item) => enrichAVItem(item));
 }
+

@@ -18,6 +18,9 @@ import {
   X,
   Check,
   Edit3,
+  Flame,
+  TrendingUp,
+  Zap,
 } from 'lucide-react';
 
 interface ClassroomPackagesViewProps {
@@ -40,6 +43,8 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
   const [expandedRooms, setExpandedRooms] = useState<Record<string, boolean>>({});
   const [internalFY, setInternalFY] = useState<string>('all');
   const [selectedBuilding, setSelectedBuilding] = useState<string>('all');
+  const [selectedUrgency, setSelectedUrgency] = useState<string>('all');
+  const [selectedUsageTier, setSelectedUsageTier] = useState<string>('all');
   const [editingRoom, setEditingRoom] = useState<ClassroomPackage | null>(null);
   const [editCost, setEditCost] = useState<number>(35000);
   const [editYear, setEditYear] = useState<number>(2021);
@@ -56,6 +61,7 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
 
   const buildings = useMemo(() => Array.from(new Set(packages.map((p) => p.building))).sort(), [packages]);
   const fiscalYears = useMemo(() => Array.from(new Set(packages.map((p) => p.projectedFiscalYear))).sort(), [packages]);
+  const hasUsageRankings = useMemo(() => packages.some((p) => p.usageRank !== undefined), [packages]);
 
   // Auto-expand packages when a specific FY filter is selected
   useEffect(() => {
@@ -84,9 +90,11 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
         if (!matchesPackage && !matchesAnyItem) return false;
       }
       if (selectedBuilding !== 'all' && pkg.building !== selectedBuilding) return false;
+      if (selectedUrgency !== 'all' && pkg.urgencyRating !== selectedUrgency) return false;
+      if (selectedUsageTier !== 'all' && pkg.usageTier !== selectedUsageTier) return false;
       return true;
     });
-  }, [packages, activeFY, selectedBuilding]);
+  }, [packages, activeFY, selectedBuilding, selectedUrgency, selectedUsageTier]);
 
   // Aggregate metrics
   const totalBundledCapEx = useMemo(
@@ -149,9 +157,51 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
               ))}
             </select>
 
+            {/* Overhaul Urgency Filter (Always visible) */}
+            <select
+              value={selectedUrgency}
+              onChange={(e) => setSelectedUrgency(e.target.value)}
+              className="bg-amber-50 border border-amber-300 rounded px-2.5 py-1 text-amber-900 font-semibold"
+              title="Filter classrooms by urgency level"
+            >
+              <option value="all">All Urgency Levels</option>
+              <option value="Critical Urgency">Critical Urgency</option>
+              <option value="High Urgency">High Urgency</option>
+              <option value="Moderate Urgency">Moderate Urgency</option>
+              <option value="Low Urgency">Low Urgency</option>
+            </select>
+
+            {/* Room Usage Filter */}
+            <select
+              value={selectedUsageTier}
+              onChange={(e) => setSelectedUsageTier(e.target.value)}
+              className="bg-purple-50 border border-purple-300 rounded px-2.5 py-1 text-purple-900 font-semibold"
+              title="Filter rooms by traffic usage intensity"
+            >
+              <option value="all">All Usage Tiers</option>
+              <option value="High Usage">High Usage</option>
+              <option value="Moderate Usage">Moderate Usage</option>
+              <option value="Low Usage">Low Usage</option>
+              <option value="Unranked">Unranked Spaces</option>
+            </select>
+
+            {(activeFY !== 'all' || selectedBuilding !== 'all' || selectedUrgency !== 'all' || selectedUsageTier !== 'all') && (
+              <button
+                onClick={() => {
+                  handleFYChange('all');
+                  setSelectedBuilding('all');
+                  setSelectedUrgency('all');
+                  setSelectedUsageTier('all');
+                }}
+                className="text-sky-600 hover:text-sky-800 underline font-medium px-1"
+              >
+                Reset filters
+              </button>
+            )}
+
             <button
               onClick={() => exportClassroomPackages(filteredPackages, 'csv')}
-              className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded text-xs font-semibold shadow-xs transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded text-xs font-semibold shadow-xs transition-colors ml-auto"
               title="Export classroom overhaul projects, composite readiness scores, and 5% compounding inflation forecast to CSV"
             >
               <FileDown className="w-3.5 h-3.5" />
@@ -159,6 +209,23 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Room Usage & Urgency Status Strip */}
+        {hasUsageRankings && (
+          <div className="mt-3 px-3 py-2 bg-purple-50/70 border border-purple-200 rounded-md flex flex-wrap items-center justify-between gap-2 text-xs text-purple-950">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-purple-600 shrink-0" />
+              <span>
+                <strong>Campus Usage Rankings Active:</strong> Classroom traffic ranking is cross-referenced with equipment EOL readiness. Rooms with higher scheduling volume and classroom utilization receive elevated overhaul urgency ratings.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="bg-purple-200/80 text-purple-900 px-2 py-0.5 rounded font-mono font-bold text-[11px]">
+                {packages.filter((p) => p.usageRank !== undefined).length} Spaces Ranked
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* 3 Summary Metrics */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-5 font-mono tabular-nums">
@@ -257,7 +324,7 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
                       <strong className="text-slate-800">{pkg.primaryEquipmentSummary}</strong>
                     </div>
 
-                    {/* Room Equipment Agedness & Readiness Composite Index */}
+                    {/* Room Equipment Agedness & Readiness Composite Index + Usage Urgency */}
                     <div className="flex flex-wrap items-center gap-3 pt-1">
                       <div
                         className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded border text-xs font-semibold ${
@@ -274,6 +341,47 @@ export const ClassroomPackagesView: React.FC<ClassroomPackagesViewProps> = ({
                         <span className="font-mono text-xs font-bold">{pkg.readinessScore}%</span>
                         <span>{pkg.readinessRating} Readiness</span>
                       </div>
+
+                      {/* Overhaul Urgency Badge (ALWAYS SHOWN) */}
+                      <div
+                        className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded border text-xs font-semibold ${
+                          pkg.urgencyRating === 'Critical Urgency'
+                            ? 'bg-rose-100 text-rose-900 border-rose-300'
+                            : pkg.urgencyRating === 'High Urgency'
+                            ? 'bg-amber-100 text-amber-900 border-amber-300'
+                            : pkg.urgencyRating === 'Moderate Urgency'
+                            ? 'bg-sky-50 text-sky-900 border-sky-200'
+                            : 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                        }`}
+                        title={`Overhaul Urgency: ${pkg.urgencyRating} (Score: ${pkg.urgencyScore || 0}/100) based on equipment EOL agedness and student usage intensity`}
+                      >
+                        {pkg.urgencyRating === 'Critical Urgency' ? (
+                          <Flame className="w-3.5 h-3.5 text-rose-600" />
+                        ) : pkg.urgencyRating === 'High Urgency' ? (
+                          <Zap className="w-3.5 h-3.5 text-amber-600" />
+                        ) : null}
+                        <span>{pkg.urgencyRating || 'Moderate Urgency'}</span>
+                        <span className="font-mono text-[11px] opacity-80">({pkg.urgencyScore || 0}/100)</span>
+                      </div>
+
+                      {/* Campus Usage Ranking Badge (when ranked) */}
+                      {pkg.usageRank && (
+                        <div
+                          className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded border text-xs font-semibold ${
+                            pkg.usageTier === 'High Usage'
+                              ? 'bg-purple-100 text-purple-900 border-purple-300'
+                              : pkg.usageTier === 'Moderate Usage'
+                              ? 'bg-indigo-50 text-indigo-900 border-indigo-200'
+                              : 'bg-slate-100 text-slate-700 border-slate-200'
+                          }`}
+                          title={`Campus Traffic Rank #${pkg.usageRank} of ${pkg.totalRankedRooms || '?'} · ${pkg.usageHours ? pkg.usageHours + ' hrs/wk' : ''} ${pkg.utilizationRate ? '(' + pkg.utilizationRate + '% util)' : ''}`}
+                        >
+                          <TrendingUp className="w-3.5 h-3.5 text-purple-700" />
+                          <span className="font-mono text-xs font-bold">#{pkg.usageRank} Campus Use</span>
+                          <span>· {pkg.usageTier}</span>
+                          {pkg.usageHours && <span className="font-mono text-[11px] text-purple-800">({pkg.usageHours}h/wk)</span>}
+                        </div>
+                      )}
 
                       <div className="text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
                         <span>Avg Age: <strong className="text-slate-700">{pkg.averageComponentAgeYears} yrs</strong></span>
